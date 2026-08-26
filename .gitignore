@@ -1,6 +1,7 @@
 # Python / Django
 venv/
 env/
+bus/
 pyvenv.cfg
 __pycache__/
 *.pyc
