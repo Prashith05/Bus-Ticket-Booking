@@ -1,12 +1,22 @@
 # Python / Django
 venv/
 env/
-bus/
 pyvenv.cfg
 __pycache__/
 *.pyc
 db.sqlite3
 .env
+
+bus/
+Include/
+Lib/
+Scripts/
+
+
+
+
+
+
 
 # React / Node
 node_modules/

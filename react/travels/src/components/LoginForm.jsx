@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import axios from 'axios'
+// import axios from 'axios'
+import api from '../api.js' // Import the custom axios instance
 import { Link, useNavigate } from 'react-router-dom'
 
 const LoginForm = ({ onLogin }) => {
@@ -16,7 +17,8 @@ const LoginForm = ({ onLogin }) => {
     setLoading(true)
     setMessage('')
     try {
-      const response = await axios.post('http://localhost:8000/api/login/', form)
+      // const response = await axios.post('http://localhost:8000/api/login/', form)
+      const response = await api.post('/api/login/', form)
       setMessage('success')
       if (onLogin) onLogin(response.data.token, response.data.user_id)
       setTimeout(() => navigate('/'), 800)

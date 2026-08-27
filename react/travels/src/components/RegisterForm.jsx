@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import axios from 'axios'
+// import axios from 'axios'
+import api from '../api.js' // Import the custom axios instance
 import { Link, useNavigate } from 'react-router-dom'
 
 const RegisterForm = () => {
@@ -16,7 +17,8 @@ const RegisterForm = () => {
     setLoading(true)
     setMessage('')
     try {
-      await axios.post('http://localhost:8000/api/register/', form)
+      // await axios.post('http://localhost:8000/api/register/', form)
+      await api.post('/api/register/', form)
       setMessage('success')
       setTimeout(() => navigate('/login'), 1500)
     } catch (error) {

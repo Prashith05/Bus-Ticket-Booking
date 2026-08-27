@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import axios from 'axios'
+// import axios from 'axios'
+import api from '../api.js' // Import the custom axios instance
 import { useParams, useNavigate } from 'react-router-dom'
 
 const BusSeats = ({ token }) => {
@@ -15,7 +16,8 @@ const BusSeats = ({ token }) => {
   useEffect(() => {
     const fetchBusDetails = async () => {
       try {
-        const response = await axios(`http://localhost:8000/api/buses/${busId}`)
+        // const response = await axios(`http://localhost:8000/api/buses/${busId}`)
+        const response = await api.get(`/api/buses/${busId}`)
         setBus(response.data)
         setSeats(response.data.seats || [])
       } catch (error) {
