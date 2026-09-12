@@ -159,7 +159,7 @@ const BusList = () => {
                   🚌 {bus.bus_name || 'Express'}
                 </div>
                 <div style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>
-                  #{bus.number}
+                  {bus.number}
                 </div>
               </div>
 
