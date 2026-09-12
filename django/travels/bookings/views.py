@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from .models import Bus,Seat,Booking
 
 
-
+ 
 # Create your views here.
 class RegisterView(APIView):
     def post(self,request):
