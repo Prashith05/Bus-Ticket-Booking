@@ -9,3 +9,4 @@ urlpatterns = [
     path('user/<int:user_id>/bookings/',UserBookingView.as_view(),name = 'user-bookings'),
     path('booking/',BookingView.as_view(),name = 'bookings'),
 ]
+
