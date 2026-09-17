@@ -43,7 +43,7 @@ const BusSeats = ({ token }) => {
     }
     setBooking(true)
     try {
-      await axios.post('http://localhost:8000/api/booking/',
+      await axios.post('/api/booking/',
         { seat: selected },
         { headers: { Authorization: `Token ${token}` } }
       )
