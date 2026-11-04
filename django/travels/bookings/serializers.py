@@ -30,11 +30,16 @@ class BusSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class BookingSerializer(serializers.ModelSerializer):
-    bus = serializers.StringRelatedField()
-    seat =SeatSerializer
-    user =serializers.StringRelatedField()
+    bus_name = serializers.CharField(source='bus.bus_name', read_only=True)
+    origin = serializers.CharField(source='bus.origin', read_only=True)
+    destination = serializers.CharField(source='bus.destination', read_only=True)
+    start_time = serializers.TimeField(source='bus.start_time', read_only=True)
+    reach_time = serializers.TimeField(source='bus.reach_time', read_only=True)
+    seat_number = serializers.CharField(source='seat.seat_number', read_only=True)
 
     class Meta:
         model = Booking
-        fields = '__all__'
-        read_only_fields = ['user','booking_time','bus','seat']
+        fields = ['id', 'user', 'bus', 'seat', 'booking_time',
+                  'bus_name', 'origin', 'destination',
+                  'start_time', 'reach_time', 'seat_number']
+        read_only_fields = fields

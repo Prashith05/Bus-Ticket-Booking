@@ -23,7 +23,7 @@ const LoginForm = ({ onLogin }) => {
       if (onLogin) onLogin(response.data.token, response.data.user_id)
       setTimeout(() => navigate('/'), 800)
     } catch (error) {
-      setMessage(error.response?.data?.message || 'Invalid username or password')
+      setMessage(error.response?.data?.error || 'Invalid username or password')
     } finally {
       setLoading(false)
     }
