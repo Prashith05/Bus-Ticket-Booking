@@ -20,7 +20,7 @@ const UserBookings = ({ token, userId }) => {
         })
         setBookings(response.data)
       } catch (error) {
-        setError(error.response?.data?.message || 'Failed to load bookings')
+        setError(error.response?.data?.error || 'Failed to load bookings')
       } finally {
         setLoading(false)
       }
@@ -104,7 +104,10 @@ const UserBookings = ({ token, userId }) => {
 
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, color: 'var(--text)' }}>
-                    Bus #{booking.bus} — Seat {booking.seat}
+                    {booking.bus_name} — Seat {booking.seat_number}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    {booking.origin} → {booking.destination} · {booking.start_time?.slice(0, 5)} - {booking.reach_time?.slice(0, 5)}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                     Booked: {formatDate(booking.booking_time)}

@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 const BusList = () => {
   const [buses, setBuses] = useState([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState({ origin: '', destination: '', date: '' })
+  const [search, setSearch] = useState({ origin: '', destination: '' })
   const [filtered, setFiltered] = useState([])
   const navigate = useNavigate()
 
@@ -97,16 +97,6 @@ const BusList = () => {
               placeholder="City or stop"
               value={search.destination}
               onChange={e => setSearch({ ...search, destination: e.target.value })}
-              style={{ background: 'var(--bg)' }}
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 140 }}>
-            <div className="input-label" style={{ marginBottom: 6 }}>📅 Date</div>
-            <input
-              className="input-field"
-              type="date"
-              value={search.date}
-              onChange={e => setSearch({ ...search, date: e.target.value })}
               style={{ background: 'var(--bg)' }}
             />
           </div>

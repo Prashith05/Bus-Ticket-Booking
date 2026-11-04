@@ -17,7 +17,7 @@ const BusSeats = ({ token }) => {
     const fetchBusDetails = async () => {
       try {
         // const response = await axios(`http://localhost:8000/api/buses/${busId}`)
-        const response = await api.get(`/api/buses/${busId}`)
+        const response = await api.get(`/api/buses/${busId}/`)
         setBus(response.data)
         setSeats(response.data.seats || [])
       } catch (error) {
@@ -43,7 +43,7 @@ const BusSeats = ({ token }) => {
     }
     setBooking(true)
     try {
-      await axios.post('/api/booking/',
+      await api.post('/api/booking/',
         { seat: selected },
         { headers: { Authorization: `Token ${token}` } }
       )
