@@ -69,7 +69,7 @@ class BookingView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Seat.DoesNotExist:
-            return Response({'error':'Invalid Seat ID'}, status = status.HTTP_404_BAD_REQUEST)
+            return Response({'error':'Invalid Seat ID'}, status = status.HTTP_404_NOT_FOUND)
         
 
 class UserBookingView(APIView):
