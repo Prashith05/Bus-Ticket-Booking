@@ -3,6 +3,16 @@ import React, { useState, useEffect } from 'react'
 import api from '../api.js' // Import the custom axios instance
 import { useParams, useNavigate } from 'react-router-dom'
 
+// '2026-11-04' -> 'Wed, 4 Nov 2026'
+const prettyDate = (iso) => {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  })
+}
+
+// `bus` below is one trip: a bus on a specific date, with that date's own seats.
 const BusSeats = ({ token }) => {
   const [bus, setBus] = useState(null)
   const [seats, setSeats] = useState([])
@@ -10,24 +20,29 @@ const BusSeats = ({ token }) => {
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState(false)
   const [toast, setToast] = useState(null)
-  const { busId } = useParams()
+  const [loadError, setLoadError] = useState(null)
+  const { tripId } = useParams()
   const navigate = useNavigate()
 
   useEffect(() => {
     const fetchBusDetails = async () => {
       try {
-        // const response = await axios(`http://localhost:8000/api/buses/${busId}`)
-        const response = await api.get(`/api/buses/${busId}/`)
+        const response = await api.get(`/api/trips/${tripId}/`)
         setBus(response.data)
         setSeats(response.data.seats || [])
       } catch (error) {
-        console.log('Error fetching bus details', error)
+        console.log('Error fetching trip details', error)
+        setLoadError(
+          error.response?.status === 404
+            ? 'This trip could not be found.'
+            : 'Could not load this trip. Please try again.'
+        )
       } finally {
         setLoading(false)
       }
     }
     fetchBusDetails()
-  }, [busId])
+  }, [tripId])
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -75,6 +90,14 @@ const BusSeats = ({ token }) => {
     </div>
   )
 
+  if (loadError) return (
+    <div style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+      <p style={{ color: '#d4530c', fontWeight: 600, marginBottom: 16 }}>{loadError}</p>
+      <button className="btn btn-primary" onClick={() => navigate('/')}>← Back to search</button>
+    </div>
+  )
+
   return (
     <div style={{ paddingTop: 36, paddingBottom: 60 }}>
       {/* Toast */}
@@ -119,6 +142,7 @@ const BusSeats = ({ token }) => {
                     borderRadius: 8, padding: '4px 12px', fontSize: 12, fontWeight: 700, marginBottom: 10,
                   }}>🚌 {bus.bus_name}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 500 }}>Bus #{bus.number}</div>
+                  <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700, marginTop: 6 }}>📅 {prettyDate(bus.date)}</div>
                 </div>
                 <div style={{
                   background: available > 5 ? 'var(--primary-light)' : '#fff3e0',
@@ -250,6 +274,7 @@ const BusSeats = ({ token }) => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
                   {[
                     { label: 'Route', value: `${bus?.origin} → ${bus?.destination}` },
+                    { label: 'Date', value: prettyDate(bus?.date) },
                     { label: 'Departure', value: formatTime(bus?.start_time) },
                     { label: 'Arrival', value: formatTime(bus?.reach_time) },
                     { label: 'Price', value: `₹${bus?.price || '53'}` },
