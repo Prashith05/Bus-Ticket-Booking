@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from .serializers import UserRegisterSerializer,BusSerializer,BookingSerializer,SeatSerializer
 from rest_framework.response import Response
 from .models import Bus,Seat,Booking
+from django.db.models import Prefetch
 
 
  
@@ -50,12 +51,18 @@ class LoginView(APIView):
     
 
 class BusListCreateView(generics.ListCreateAPIView):
-    queryset = Bus.objects.all()
+    # queryset = Bus.objects.all() # caused the problem by ordering the seats at the last after booking the seat(alignment changing problem)
+    queryset = Bus.objects.prefetch_related(
+        Prefetch('seats', queryset=Seat.objects.order_by('id'))
+    )
     serializer_class = BusSerializer
     permission_classes = [IsAdminOrReadOnly]
 
 class BusDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Bus.objects.all()
+    # queryset = Bus.objects.all()
+    queryset = Bus.objects.prefetch_related(
+        Prefetch('seats', queryset=Seat.objects.order_by('id'))
+    )
     serializer_class = BusSerializer
     permission_classes = [IsAdminOrReadOnly]
 
