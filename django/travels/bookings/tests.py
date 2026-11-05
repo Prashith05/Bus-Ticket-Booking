@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
@@ -189,3 +190,105 @@ class BusPermissionTests(BaseApiTest):
         # admin
         self.auth(self.admin)
         self.assertEqual(self.client.post('/api/buses/', payload, format='json').status_code, 201)
+
+
+class CancelBookingTests(BaseApiTest):
+    def setUp(self):
+        super().setUp()
+        # Freeze the clock at 06:30 IST on the trip's day (the bus leaves at 08:00 IST), so these
+        # tests give the same result whatever time of day they run.
+        patcher = patch('django.utils.timezone.now', return_value=self.at(1, 0))
+        self.mock_now = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make_booking(self, user=None, seat=None):
+        self.auth(user or self.user)
+        res = self.book(seat or self.seat)
+        self.assertEqual(res.status_code, 201)
+        return res.data['id']
+
+    def cancel(self, booking_id):
+        return self.client.post(f'/api/booking/{booking_id}/cancel/', {}, format='json')
+
+    def at(self, hour, minute=0):
+        """A fixed UTC moment on the trip's day (bus departs 08:00 IST = 02:30 UTC)."""
+        return datetime(self.today.year, self.today.month, self.today.day, hour, minute, tzinfo=dt_timezone.utc)
+
+    def test_cancel_frees_the_seat_and_keeps_history(self):
+        booking_id = self.make_booking()
+        res = self.cancel(booking_id)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['status'], 'cancelled')
+        self.assertIsNotNone(res.data['cancelled_at'])
+        self.assertFalse(res.data['can_cancel'])
+        self.seat.refresh_from_db()
+        self.assertFalse(self.seat.is_booked)
+        self.assertEqual(Booking.objects.count(), 1)  # kept, not deleted
+
+    def test_available_seats_goes_back_up(self):
+        booking_id = self.make_booking()
+        self.assertEqual(self.client.get(f'/api/trips/?date={self.today}').data[0]['available_seats'], 3)
+        self.cancel(booking_id)
+        self.assertEqual(self.client.get(f'/api/trips/?date={self.today}').data[0]['available_seats'], 4)
+
+    def test_cancelled_seat_can_be_booked_again_by_someone_else(self):
+        first = self.make_booking(self.user)
+        self.cancel(first)
+        self.auth(self.other)
+        res = self.book(self.seat)
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(Booking.objects.count(), 2)
+        self.assertEqual(Booking.objects.filter(status='confirmed').count(), 1)
+
+    def test_cancelling_twice_does_not_free_a_seat_someone_else_rebooked(self):
+        first = self.make_booking(self.user)
+        self.cancel(first)
+        self.auth(self.other)
+        self.book(self.seat)  # bob now holds the seat
+        self.auth(self.user)
+        res = self.cancel(first)  # alice tries again
+        self.assertEqual(res.status_code, 400)
+        self.seat.refresh_from_db()
+        self.assertTrue(self.seat.is_booked)
+
+    def test_cannot_cancel_someone_elses_booking(self):
+        booking_id = self.make_booking(self.user)
+        self.auth(self.other)
+        self.assertEqual(self.cancel(booking_id).status_code, 403)
+        self.seat.refresh_from_db()
+        self.assertTrue(self.seat.is_booked)
+        self.assertEqual(Booking.objects.get(id=booking_id).status, 'confirmed')
+
+    def test_cancel_requires_login_and_valid_id(self):
+        booking_id = self.make_booking()
+        self.client.credentials()  # log out
+        self.assertEqual(self.cancel(booking_id).status_code, 401)
+        self.auth(self.user)
+        self.assertEqual(self.cancel(99999).status_code, 404)
+
+    def test_can_cancel_before_departure_but_not_after(self):
+        booking_id = self.make_booking()
+        # 06:30 IST: the bus has not left yet
+        listed = self.client.get(f'/api/user/{self.user.id}/bookings/').data[0]
+        self.assertTrue(listed['can_cancel'])
+
+        # 08:30 IST: the bus has left, so cancelling is refused and the seat stays booked
+        self.mock_now.return_value = self.at(3, 0)
+        listed = self.client.get(f'/api/user/{self.user.id}/bookings/').data[0]
+        self.assertFalse(listed['can_cancel'])
+        self.assertEqual(self.cancel(booking_id).status_code, 400)
+        self.seat.refresh_from_db()
+        self.assertTrue(self.seat.is_booked)
+
+        # back to 06:30 IST: it works
+        self.mock_now.return_value = self.at(1, 0)
+        self.assertEqual(self.cancel(booking_id).status_code, 200)
+
+    def test_bookings_list_shows_cancelled_ones_newest_first(self):
+        first = self.make_booking(self.user, self.seat)
+        second_seat = self.trip.seats.order_by('id')[1]
+        self.make_booking(self.user, second_seat)
+        self.cancel(first)
+        res = self.client.get(f'/api/user/{self.user.id}/bookings/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([b['status'] for b in res.data], ['confirmed', 'cancelled'])

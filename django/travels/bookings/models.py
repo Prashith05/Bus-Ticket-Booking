@@ -45,10 +45,20 @@ class Seat(models.Model):
 
 
 class Booking(models.Model):
+    STATUS_CONFIRMED = 'confirmed'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_CONFIRMED, 'Confirmed'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+
     user = models.ForeignKey(User,on_delete=models.CASCADE)
     trip = models.ForeignKey(Trip,on_delete=models.CASCADE)
     seat = models.ForeignKey(Seat,on_delete=models.CASCADE)
     booking_time = models.DateTimeField(auto_now_add=True)
+    # A cancelled booking is kept (for the user's history); its seat becomes free again.
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_CONFIRMED)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         bus = self.trip.bus
