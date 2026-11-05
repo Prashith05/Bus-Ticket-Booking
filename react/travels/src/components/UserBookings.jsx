@@ -28,6 +28,15 @@ const UserBookings = ({ token, userId }) => {
     fetchBookings()
   }, [userId, token])
 
+  // 'YYYY-MM-DD' -> 'Wed, 4 Nov 2026' (built from parts so the time zone can't shift the day)
+  const formatTravelDate = (iso) => {
+    if (!iso) return ''
+    const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    })
+  }
+
   const formatDate = (str) => {
     if (!str) return ''
     const d = new Date(str)
@@ -108,6 +117,9 @@ const UserBookings = ({ token, userId }) => {
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                     {booking.origin} → {booking.destination} · {booking.start_time?.slice(0, 5)} - {booking.reach_time?.slice(0, 5)}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>
+                    📅 Travel date: {formatTravelDate(booking.travel_date)}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                     Booked: {formatDate(booking.booking_time)}

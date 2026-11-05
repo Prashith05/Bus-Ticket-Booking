@@ -3,36 +3,77 @@ import React, { useState, useEffect } from 'react'
 import api from '../api.js' // Import the custom axios instance
 import { useNavigate } from 'react-router-dom'
 
+// Customers can book from today up to this many days ahead (same limit as the backend).
+const BOOKING_WINDOW_DAYS = 30
+
+// 'YYYY-MM-DD' in the user's own time zone (toISOString() would use UTC and can be a day off).
+const toISODate = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// '2026-11-04' -> 'Wed, 4 Nov 2026'
+const prettyDate = (iso) => {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  })
+}
+
 const BusList = () => {
-  const [buses, setBuses] = useState([])
+  const today = new Date()
+  const maxDate = new Date()
+  maxDate.setDate(maxDate.getDate() + BOOKING_WINDOW_DAYS)
+  const minISO = toISODate(today)
+  const maxISO = toISODate(maxDate)
+
+  const [trips, setTrips] = useState([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState({ origin: '', destination: '' })
-  const [filtered, setFiltered] = useState([])
+  const [error, setError] = useState(null)
+  const [search, setSearch] = useState({ origin: '', destination: '', date: minISO })
+  const [searchedDate, setSearchedDate] = useState(minISO)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    const fetchBuses = async () => {
-      try {
-        // const response = await axios.get('http://localhost:8000/api/buses/')
-        const response = await api.get('/api/buses/')
-        setBuses(response.data)
-        setFiltered(response.data)
-      } catch (error) {
-        console.log('Error fetching buses', error)
-      } finally {
-        setLoading(false)
-      }
+  // Ask the backend for the buses running on one date (it also applies From / To).
+  const fetchTrips = async (params) => {
+    try {
+      const response = await api.get('/api/trips/', {
+        params: {
+          date: params.date,
+          origin: params.origin || undefined,
+          destination: params.destination || undefined,
+        },
+      })
+      setTrips(response.data)
+      setSearchedDate(params.date)
+    } catch (err) {
+      console.log('Error fetching buses', err)
+      setTrips([])
+      setError(
+        err.response?.data?.date
+          ? 'Please pick a valid date.'
+          : 'Could not load buses. Please check your connection and try again.'
+      )
+    } finally {
+      setLoading(false)
     }
-    fetchBuses()
+  }
+
+  // Load today's buses when the page opens. (State is only set after the request
+  // finishes, so the "set state in effect" warning does not apply here.)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchTrips({ origin: '', destination: '', date: minISO })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleSearch = () => {
-    const results = buses.filter(b => {
-      const matchOrigin = !search.origin || b.origin.toLowerCase().includes(search.origin.toLowerCase())
-      const matchDest = !search.destination || b.destination.toLowerCase().includes(search.destination.toLowerCase())
-      return matchOrigin && matchDest
-    })
-    setFiltered(results)
+    if (!search.date || search.date < minISO || search.date > maxISO) {
+      setError(`Please pick a date between today and ${prettyDate(maxISO)}.`)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    fetchTrips(search)
   }
 
   const formatTime = (t) => {
@@ -100,6 +141,18 @@ const BusList = () => {
               style={{ background: 'var(--bg)' }}
             />
           </div>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div className="input-label" style={{ marginBottom: 6 }}>📅 Date</div>
+            <input
+              className="input-field"
+              type="date"
+              min={minISO}
+              max={maxISO}
+              value={search.date}
+              onChange={e => setSearch({ ...search, date: e.target.value })}
+              style={{ background: 'var(--bg)' }}
+            />
+          </div>
           <button className="btn btn-accent" style={{ padding: '13px 28px', borderRadius: 10 }} onClick={handleSearch}>
             Search
           </button>
@@ -109,7 +162,7 @@ const BusList = () => {
       {/* Results */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text)' }}>
-          {filtered.length} buses available
+          {loading ? 'Searching…' : `${trips.length} ${trips.length === 1 ? 'bus' : 'buses'} on ${prettyDate(searchedDate)}`}
         </h2>
         <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>Sorted by departure time</span>
       </div>
@@ -119,14 +172,19 @@ const BusList = () => {
           <div style={{ fontSize: 36, marginBottom: 12 }}>🚌</div>
           <p style={{ color: 'var(--text-muted)' }}>Fetching available buses…</p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : error ? (
+        <div style={{ textAlign: 'center', padding: 60 }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+          <p style={{ color: '#d4530c', fontWeight: 600 }}>{error}</p>
+        </div>
+      ) : trips.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
-          <p style={{ color: 'var(--text-muted)' }}>No buses found. Try different search terms.</p>
+          <p style={{ color: 'var(--text-muted)' }}>No buses found for this date. Try different search terms or another day.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {filtered.map((bus, i) => (
+          {trips.map((bus, i) => (
             <div key={bus.id} className="card" style={{
               padding: '24px 28px',
               display: 'flex', alignItems: 'center', gap: 24,
@@ -186,11 +244,18 @@ const BusList = () => {
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 700, color: 'var(--text)' }}>
                   ₹{bus.price || '53'}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 12 }}>per seat</div>
+                <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 4 }}>per seat</div>
+                <div style={{
+                  fontSize: 12, fontWeight: 700, marginBottom: 10,
+                  color: bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
+                }}>
+                  {bus.available_seats === 0 ? 'Sold out' : `${bus.available_seats} seats left`}
+                </div>
+                {/* `bus` here is one trip (a bus on this date), so bus.id is the trip id */}
                 <button
                   className="btn btn-primary"
                   style={{ padding: '10px 20px', fontSize: 14 }}
-                  onClick={() => navigate(`/bus/${bus.id}`)}
+                  onClick={() => navigate(`/trip/${bus.id}`)}
                 >
                   View Seats
                 </button>
