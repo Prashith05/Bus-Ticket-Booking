@@ -7,6 +7,8 @@ const UserBookings = ({ token, userId }) => {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [cancellingId, setCancellingId] = useState(null)
+  const [notice, setNotice] = useState(null) // { type: 'success' | 'error', text }
 
   useEffect(() => {
     const fetchBookings = async () => {
@@ -27,6 +29,26 @@ const UserBookings = ({ token, userId }) => {
     }
     fetchBookings()
   }, [userId, token])
+
+  const handleCancel = async (booking) => {
+    const ok = window.confirm(
+      `Cancel your ticket for ${booking.bus_name}, seat ${booking.seat_number}, on ${formatTravelDate(booking.travel_date)}?\n\nThe seat will be released for other passengers.`
+    )
+    if (!ok) return
+    setCancellingId(booking.id)
+    setNotice(null)
+    try {
+      const response = await api.post(`/api/booking/${booking.id}/cancel/`, {}, {
+        headers: { Authorization: `Token ${token}` }
+      })
+      setBookings(prev => prev.map(b => (b.id === booking.id ? response.data : b)))
+      setNotice({ type: 'success', text: `Seat ${booking.seat_number} on ${booking.bus_name} was cancelled.` })
+    } catch (err) {
+      setNotice({ type: 'error', text: err.response?.data?.error || 'Could not cancel this booking. Please try again.' })
+    } finally {
+      setCancellingId(null)
+    }
+  }
 
   // 'YYYY-MM-DD' -> 'Wed, 4 Nov 2026' (built from parts so the time zone can't shift the day)
   const formatTravelDate = (iso) => {
@@ -83,8 +105,8 @@ const UserBookings = ({ token, userId }) => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
             {[
               { icon: '🎫', label: 'Total Bookings', value: bookings.length },
-              { icon: '✅', label: 'Confirmed', value: bookings.filter(b => b.booking_time).length },
-              { icon: '🚌', label: 'Buses Taken', value: new Set(bookings.map(b => b.bus)).size },
+              { icon: '✅', label: 'Confirmed', value: bookings.filter(b => b.status === 'confirmed').length },
+              { icon: '🚌', label: 'Buses Taken', value: new Set(bookings.filter(b => b.status === 'confirmed').map(b => b.bus)).size },
             ].map(({ icon, label, value }) => (
               <div key={label} className="card" style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div style={{
@@ -100,10 +122,20 @@ const UserBookings = ({ token, userId }) => {
             ))}
           </div>
 
+          {notice && (
+            <div style={{
+              marginBottom: 16, padding: '12px 18px', borderRadius: 10, fontSize: 14, fontWeight: 600,
+              background: notice.type === 'success' ? 'var(--primary-light)' : '#fdecea',
+              color: notice.type === 'success' ? 'var(--primary-dark)' : '#b42318',
+            }}>
+              {notice.text}
+            </div>
+          )}
+
           {/* Booking list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {bookings.map((booking, i) => (
-              <div key={booking.id || i} className="card" style={{ padding: '22px 28px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+              <div key={booking.id || i} className="card" style={{ padding: '22px 28px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', opacity: booking.status === 'cancelled' ? 0.6 : 1 }}>
                 {/* Status dot */}
                 <div style={{
                   width: 44, height: 44, borderRadius: 12,
@@ -124,15 +156,32 @@ const UserBookings = ({ token, userId }) => {
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                     Booked: {formatDate(booking.booking_time)}
                   </div>
+                  {booking.status === 'cancelled' && booking.cancelled_at && (
+                    <div style={{ fontSize: 13, color: '#b42318' }}>
+                      Cancelled: {formatDate(booking.cancelled_at)}
+                    </div>
+                  )}
                 </div>
 
-                <div style={{
-                  background: 'var(--primary-light)',
-                  color: 'var(--primary-dark)',
-                  borderRadius: 20, padding: '6px 14px',
-                  fontSize: 12, fontWeight: 700,
-                }}>
-                  Confirmed ✓
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+                  <div style={{
+                    background: booking.status === 'cancelled' ? '#fdecea' : 'var(--primary-light)',
+                    color: booking.status === 'cancelled' ? '#b42318' : 'var(--primary-dark)',
+                    borderRadius: 20, padding: '6px 14px',
+                    fontSize: 12, fontWeight: 700,
+                  }}>
+                    {booking.status === 'cancelled' ? 'Cancelled ✕' : 'Confirmed ✓'}
+                  </div>
+                  {booking.can_cancel && (
+                    <button
+                      className="btn"
+                      style={{ padding: '8px 16px', fontSize: 13, border: '1.5px solid #ef4444', color: '#ef4444', background: 'transparent', borderRadius: 8, cursor: cancellingId === booking.id ? 'wait' : 'pointer' }}
+                      disabled={cancellingId === booking.id}
+                      onClick={() => handleCancel(booking)}
+                    >
+                      {cancellingId === booking.id ? 'Cancelling…' : 'Cancel ticket'}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -14,7 +14,7 @@ from .serializers import (
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from .models import Bus,Seat,Booking,Trip
-from .services import ensure_trips
+from .services import ensure_trips, has_departed
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import date as date_type
@@ -147,6 +147,42 @@ class UserBookingView(APIView):
         if request.user.id != user_id:
             return Response({'error':'Forbidden'},status=status.HTTP_403_FORBIDDEN)
         
-        bookings = Booking.objects.filter(user_id=user_id).select_related('trip__bus', 'seat')
+        bookings = Booking.objects.filter(user_id=user_id).select_related('trip__bus', 'seat').order_by('-booking_time', '-id')
         serializer =BookingSerializer(bookings,many=True)
         return Response(serializer.data)
+
+
+class CancelBookingView(APIView):
+    """POST /api/booking/<id>/cancel/ - cancel your own ticket and free the seat."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        with transaction.atomic():
+            try:
+                # Lock the booking row, then its seat, so a double click or a simultaneous
+                # new booking of the same seat cannot leave the seat in the wrong state.
+                booking = (
+                    Booking.objects.select_for_update(of=('self',))
+                    .select_related('trip__bus')
+                    .get(pk=pk)
+                )
+            except Booking.DoesNotExist:
+                return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if booking.user_id != request.user.id:
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+            if booking.status == Booking.STATUS_CANCELLED:
+                return Response({'error': 'This booking is already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+            if has_departed(booking.trip):
+                return Response({'error': 'This bus has already departed, so the ticket cannot be cancelled'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            seat = Seat.objects.select_for_update().get(pk=booking.seat_id)
+            seat.is_booked = False
+            seat.save()
+
+            booking.status = Booking.STATUS_CANCELLED
+            booking.cancelled_at = timezone.now()
+            booking.save()
+
+        return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Bus,Seat,Booking,Trip
 from django.contrib.auth.models import User
+from .services import has_departed
 
 
 class UserRegisterSerializer(serializers.ModelSerializer):
@@ -69,10 +70,16 @@ class BookingSerializer(serializers.ModelSerializer):
     start_time = serializers.TimeField(source='trip.bus.start_time', read_only=True)
     reach_time = serializers.TimeField(source='trip.bus.reach_time', read_only=True)
     seat_number = serializers.CharField(source='seat.seat_number', read_only=True)
+    can_cancel = serializers.SerializerMethodField()
+
+    def get_can_cancel(self, booking):
+        # Only a confirmed ticket for a bus that has not left yet can be cancelled.
+        return booking.status == Booking.STATUS_CONFIRMED and not has_departed(booking.trip)
 
     class Meta:
         model = Booking
         fields = ['id', 'user', 'bus', 'trip', 'seat', 'booking_time', 'travel_date',
                   'bus_name', 'origin', 'destination',
-                  'start_time', 'reach_time', 'seat_number']
+                  'start_time', 'reach_time', 'seat_number',
+                  'status', 'cancelled_at', 'can_cancel']
         read_only_fields = fields
