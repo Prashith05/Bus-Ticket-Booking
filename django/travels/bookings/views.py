@@ -14,7 +14,7 @@ from .serializers import (
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from .models import Bus,Seat,Booking,Trip
-from .services import ensure_trips, has_departed
+from .services import ensure_trips, has_departed, is_booking_closed, BOOKING_CUTOFF_MINUTES
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import date as date_type
@@ -122,10 +122,16 @@ class BookingView(APIView):
                     return Response({'error': 'Seat already booked'}, status=status.HTTP_400_BAD_REQUEST)
 
                 trip = seat.trip
-                # Covers past dates and also a bus that already left earlier today.
+                # Covers past dates, a bus that left earlier today, and the last few minutes
+                # before departure (booking stops BOOKING_CUTOFF_MINUTES before the bus leaves).
                 if has_departed(trip):
                     return Response({'error': 'This bus has already departed, so it can no longer be booked'},
                                     status=status.HTTP_400_BAD_REQUEST)
+                if is_booking_closed(trip):
+                    return Response(
+                        {'error': f'Booking for this bus has closed. Tickets can be booked until '
+                                  f'{BOOKING_CUTOFF_MINUTES} minutes before departure.'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
                 seat.is_booked = True
                 seat.save()

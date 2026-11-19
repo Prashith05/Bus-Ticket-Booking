@@ -15,6 +15,21 @@ def departure_datetime(trip):
     return datetime.combine(trip.date, trip.bus.start_time, tzinfo=BUS_TZ)
 
 
+# Tickets stop selling this many minutes before the bus leaves, so a person who is still
+# paying or confirming when the bus pulls away can never end up with a seat that is not honoured.
+BOOKING_CUTOFF_MINUTES = 15
+
+
+def booking_closes_at(trip):
+    """The moment booking stops for this trip (timezone-aware)."""
+    return departure_datetime(trip) - timedelta(minutes=BOOKING_CUTOFF_MINUTES)
+
+
+def is_booking_closed(trip):
+    """True from BOOKING_CUTOFF_MINUTES before departure onwards (this includes after departure)."""
+    return timezone.now() >= booking_closes_at(trip)
+
+
 def has_departed(trip):
     """True once the bus has left: its ticket can no longer be cancelled."""
     return timezone.now() >= departure_datetime(trip)

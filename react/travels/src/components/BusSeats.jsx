@@ -50,7 +50,7 @@ const BusSeats = ({ token }) => {
   }
 
   const handleBook = async () => {
-    if (!selected || departed) return
+    if (!selected || closed) return
     if (!token) {
       showToast('Please login to book a seat', 'error')
       setTimeout(() => navigate('/login'), 1200)
@@ -76,8 +76,10 @@ const BusSeats = ({ token }) => {
 
   const selectedSeat = seats.find(s => s.id === selected)
   const available = seats.filter(s => !s.is_booked).length
-  // Once the bus has left, its seats can no longer be booked (the server enforces this too).
+  // Booking stops shortly before departure (the server enforces this too). For such a trip the
+  // server does not send any seats, so we show a message instead of a seat map.
   const departed = !!bus?.departed
+  const closed = !!bus?.booking_closed
 
   // Group seats into rows of 4 (2+2 layout)
   const rows = []
@@ -130,7 +132,7 @@ const BusSeats = ({ token }) => {
         ← Back to results
       </button>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: closed ? '1fr' : '1fr 340px', gap: 24, alignItems: 'start' }}>
         {/* Left: Bus info + seat map */}
         <div>
           {/* Bus info card */}
@@ -147,11 +149,11 @@ const BusSeats = ({ token }) => {
                   <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700, marginTop: 6 }}>📅 {prettyDate(bus.date)}</div>
                 </div>
                 <div style={{
-                  background: departed ? '#fdecea' : available > 5 ? 'var(--primary-light)' : '#fff3e0',
-                  color: departed ? '#b42318' : available > 5 ? 'var(--primary-dark)' : '#d97706',
+                  background: closed ? '#eef0f3' : available > 5 ? 'var(--primary-light)' : '#fff3e0',
+                  color: closed ? '#667085' : available > 5 ? 'var(--primary-dark)' : '#d97706',
                   borderRadius: 20, padding: '6px 14px', fontSize: 13, fontWeight: 700,
                 }}>
-                  {departed ? 'Departed' : `${available} seats left`}
+                  {departed ? 'Departed' : closed ? 'Booking closed' : `${available} seats left`}
                 </div>
               </div>
 
@@ -181,16 +183,29 @@ const BusSeats = ({ token }) => {
             </div>
           )}
 
-          {departed && (
-            <div style={{
-              marginBottom: 20, padding: '14px 20px', borderRadius: 12, fontSize: 14, fontWeight: 600,
-              background: '#fdecea', color: '#b42318',
+          {closed ? (
+            /* Dimmed message in place of the seat map: no seats are loaded for a closed trip */
+            <div className="card" style={{
+              padding: '56px 32px', textAlign: 'center', background: 'var(--bg)',
+              border: '1.5px dashed var(--border)',
             }}>
-              🚫 This bus has already left, so booking is closed for this trip. Pick another bus or date.
+              <div style={{ fontSize: 46, marginBottom: 14, filter: 'grayscale(1)', opacity: 0.7 }}>
+                {departed ? '🚌' : '⏱️'}
+              </div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text-muted)', marginBottom: 8 }}>
+                {departed ? 'This bus has left' : 'Booking has closed for this bus'}
+              </h3>
+              <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 24px', lineHeight: 1.6 }}>
+                {departed
+                  ? `${bus.bus_name} departed at ${formatTime(bus.start_time)} on ${prettyDate(bus.date)}, so seats are no longer available.`
+                  : `Tickets can be booked until ${bus.booking_cutoff_minutes} minutes before departure. ${bus.bus_name} leaves at ${formatTime(bus.start_time)}.`}
+              </p>
+              <button className="btn btn-primary" style={{ padding: '11px 24px' }} onClick={() => navigate('/')}>
+                Browse other buses
+              </button>
             </div>
-          )}
-
-          {/* Seat map */}
+          ) : (
+          /* Seat map */
           <div className="card" style={{ padding: 28 }}>
             <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Select a Seat</h3>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>Click on an available seat to select it</p>
@@ -233,8 +248,7 @@ const BusSeats = ({ token }) => {
                 {rows.map((row, ri) => (
                   <div key={ri} style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                     {row.map((seat, ci) => {
-                      // A seat on a bus that has left is shown and treated like a booked one.
-                      const isBooked = seat.is_booked || departed
+                      const isBooked = seat.is_booked
                       const isSelected = selected === seat.id
                       const isAisle = ci === 1 // gap after 2nd seat
                       return (
@@ -253,7 +267,7 @@ const BusSeats = ({ token }) => {
                               cursor: isBooked ? 'not-allowed' : 'pointer',
                               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
                             }}
-                            title={departed ? 'Bus has departed' : isBooked ? 'Booked' : `Seat ${seat.seat_number}`}
+                            title={isBooked ? 'Booked' : `Seat ${seat.seat_number}`}
                           >
                             <span style={{ fontSize: 16 }}>{isBooked ? '🚫' : isSelected ? '✓' : '💺'}</span>
                             <span>{seat.seat_number}</span>
@@ -268,9 +282,11 @@ const BusSeats = ({ token }) => {
               </div>
             </div>
           </div>
+          )}
         </div>
 
-        {/* Right: Booking summary */}
+        {/* Right: Booking summary (not needed when booking is closed) */}
+        {!closed && (
         <div style={{ position: 'sticky', top: 'calc(var(--nav-h) + 20px)' }}>
           <div className="card" style={{ padding: 28 }}>
             <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, marginBottom: 20 }}>Booking Summary</h3>
@@ -314,10 +330,8 @@ const BusSeats = ({ token }) => {
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>{departed ? '🚫' : '💺'}</div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-                  {departed ? 'Booking is closed because this bus has already left.' : 'Select a seat to see your booking summary'}
-                </p>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>💺</div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Select a seat to see your booking summary</p>
               </div>
             )}
           </div>
@@ -331,6 +345,7 @@ const BusSeats = ({ token }) => {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )

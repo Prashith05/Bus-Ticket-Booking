@@ -192,7 +192,7 @@ const BusList = () => {
               transition: 'box-shadow 0.2s, transform 0.2s',
               cursor: 'default',
               animationDelay: `${i * 50}ms`,
-              opacity: bus.departed ? 0.6 : 1,
+              opacity: bus.booking_closed ? 0.6 : 1,
             }}
               onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
               onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.transform = 'none' }}
@@ -248,18 +248,18 @@ const BusList = () => {
                 <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 4 }}>per seat</div>
                 <div style={{
                   fontSize: 12, fontWeight: 700, marginBottom: 10,
-                  color: bus.departed ? 'var(--text-muted)' : bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
+                  color: bus.booking_closed ? 'var(--text-muted)' : bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
                 }}>
-                  {bus.departed ? 'Departed' : bus.available_seats === 0 ? 'Sold out' : `${bus.available_seats} seats left`}
+                  {bus.departed ? 'Departed' : bus.booking_closed ? 'Booking closed' : bus.available_seats === 0 ? 'Sold out' : `${bus.available_seats} seats left`}
                 </div>
                 {/* `bus` here is one trip (a bus on this date), so bus.id is the trip id */}
                 <button
                   className="btn btn-primary"
-                  style={{ padding: '10px 20px', fontSize: 14, cursor: bus.departed ? 'not-allowed' : 'pointer' }}
-                  disabled={bus.departed}
+                  style={{ padding: '10px 20px', fontSize: 14, cursor: bus.booking_closed ? 'not-allowed' : 'pointer' }}
+                  disabled={bus.booking_closed}
                   onClick={() => navigate(`/trip/${bus.id}`)}
                 >
-                  {bus.departed ? 'Booking closed' : 'View Seats'}
+                  {bus.booking_closed ? 'Booking closed' : 'View Seats'}
                 </button>
               </div>
             </div>
