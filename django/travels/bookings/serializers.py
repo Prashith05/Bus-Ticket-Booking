@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import Bus,Seat,Booking,Trip
 from django.contrib.auth.models import User
-from .services import has_departed
+from .services import has_departed, is_booking_closed, BOOKING_CUTOFF_MINUTES
 
 
 class UserRegisterSerializer(serializers.ModelSerializer):
@@ -42,22 +42,41 @@ class TripSerializer(serializers.ModelSerializer):
     reach_time = serializers.TimeField(source='bus.reach_time', read_only=True)
     price = serializers.DecimalField(source='bus.price', max_digits=8, decimal_places=2, read_only=True)
     available_seats = serializers.IntegerField(read_only=True)
+    departed = serializers.SerializerMethodField()
+    booking_closed = serializers.SerializerMethodField()
+
+    def get_departed(self, trip):
+        # True once the bus has left.
+        return has_departed(trip)
+
+    def get_booking_closed(self, trip):
+        # True from 15 minutes before departure: the trip can no longer be booked.
+        return is_booking_closed(trip)
 
     class Meta:
         model = Trip
         fields = ['id', 'date', 'bus_id', 'bus_name', 'number', 'origin', 'destination',
-                  'features', 'start_time', 'reach_time', 'price', 'available_seats']
+                  'features', 'start_time', 'reach_time', 'price', 'available_seats',
+                  'departed', 'booking_closed']
 
 
 class TripDetailSerializer(TripSerializer):
     """One trip with its seats, always in seat-creation order (S1, S2, ...)
     so a booked seat never jumps to the end of the list."""
     seats = serializers.SerializerMethodField()
+    booking_cutoff_minutes = serializers.SerializerMethodField()
 
     class Meta(TripSerializer.Meta):
-        fields = TripSerializer.Meta.fields + ['seats']
+        fields = TripSerializer.Meta.fields + ['booking_cutoff_minutes', 'seats']
+
+    def get_booking_cutoff_minutes(self, trip):
+        return BOOKING_CUTOFF_MINUTES
 
     def get_seats(self, trip):
+        # Nobody can book a closed trip, so its seat list is not even read from the database or
+        # sent: that saves server time on buses that have left (or are about to).
+        if is_booking_closed(trip):
+            return []
         return SeatSerializer(trip.seats.order_by('id'), many=True).data
 
 
