@@ -122,8 +122,10 @@ class BookingView(APIView):
                     return Response({'error': 'Seat already booked'}, status=status.HTTP_400_BAD_REQUEST)
 
                 trip = seat.trip
-                if trip.date < timezone.localdate():
-                    return Response({'error': 'This trip has already taken place'}, status=status.HTTP_400_BAD_REQUEST)
+                # Covers past dates and also a bus that already left earlier today.
+                if has_departed(trip):
+                    return Response({'error': 'This bus has already departed, so it can no longer be booked'},
+                                    status=status.HTTP_400_BAD_REQUEST)
 
                 seat.is_booked = True
                 seat.save()

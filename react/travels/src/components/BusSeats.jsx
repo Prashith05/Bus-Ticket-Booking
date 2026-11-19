@@ -50,7 +50,7 @@ const BusSeats = ({ token }) => {
   }
 
   const handleBook = async () => {
-    if (!selected) return
+    if (!selected || departed) return
     if (!token) {
       showToast('Please login to book a seat', 'error')
       setTimeout(() => navigate('/login'), 1200)
@@ -76,6 +76,8 @@ const BusSeats = ({ token }) => {
 
   const selectedSeat = seats.find(s => s.id === selected)
   const available = seats.filter(s => !s.is_booked).length
+  // Once the bus has left, its seats can no longer be booked (the server enforces this too).
+  const departed = !!bus?.departed
 
   // Group seats into rows of 4 (2+2 layout)
   const rows = []
@@ -145,11 +147,11 @@ const BusSeats = ({ token }) => {
                   <div style={{ color: 'var(--text)', fontSize: 14, fontWeight: 700, marginTop: 6 }}>📅 {prettyDate(bus.date)}</div>
                 </div>
                 <div style={{
-                  background: available > 5 ? 'var(--primary-light)' : '#fff3e0',
-                  color: available > 5 ? 'var(--primary-dark)' : '#d97706',
+                  background: departed ? '#fdecea' : available > 5 ? 'var(--primary-light)' : '#fff3e0',
+                  color: departed ? '#b42318' : available > 5 ? 'var(--primary-dark)' : '#d97706',
                   borderRadius: 20, padding: '6px 14px', fontSize: 13, fontWeight: 700,
                 }}>
-                  {available} seats left
+                  {departed ? 'Departed' : `${available} seats left`}
                 </div>
               </div>
 
@@ -176,6 +178,15 @@ const BusSeats = ({ token }) => {
                   <div style={{ fontSize: 14, color: 'var(--text-muted)', fontWeight: 600, marginTop: 6 }}>{bus.destination}</div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {departed && (
+            <div style={{
+              marginBottom: 20, padding: '14px 20px', borderRadius: 12, fontSize: 14, fontWeight: 600,
+              background: '#fdecea', color: '#b42318',
+            }}>
+              🚫 This bus has already left, so booking is closed for this trip. Pick another bus or date.
             </div>
           )}
 
@@ -222,7 +233,8 @@ const BusSeats = ({ token }) => {
                 {rows.map((row, ri) => (
                   <div key={ri} style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                     {row.map((seat, ci) => {
-                      const isBooked = seat.is_booked
+                      // A seat on a bus that has left is shown and treated like a booked one.
+                      const isBooked = seat.is_booked || departed
                       const isSelected = selected === seat.id
                       const isAisle = ci === 1 // gap after 2nd seat
                       return (
@@ -241,7 +253,7 @@ const BusSeats = ({ token }) => {
                               cursor: isBooked ? 'not-allowed' : 'pointer',
                               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
                             }}
-                            title={isBooked ? 'Booked' : `Seat ${seat.seat_number}`}
+                            title={departed ? 'Bus has departed' : isBooked ? 'Booked' : `Seat ${seat.seat_number}`}
                           >
                             <span style={{ fontSize: 16 }}>{isBooked ? '🚫' : isSelected ? '✓' : '💺'}</span>
                             <span>{seat.seat_number}</span>
@@ -302,8 +314,10 @@ const BusSeats = ({ token }) => {
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>💺</div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Select a seat to see your booking summary</p>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>{departed ? '🚫' : '💺'}</div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
+                  {departed ? 'Booking is closed because this bus has already left.' : 'Select a seat to see your booking summary'}
+                </p>
               </div>
             )}
           </div>

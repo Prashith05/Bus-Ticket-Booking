@@ -12,8 +12,17 @@ from .services import BOOKING_WINDOW_DAYS
 
 
 class BaseApiTest(APITestCase):
+    def at(self, hour, minute=0):
+        """A fixed UTC moment on the trip's day (the bus departs 08:00 IST = 02:30 UTC)."""
+        return datetime(self.today.year, self.today.month, self.today.day, hour, minute, tzinfo=dt_timezone.utc)
+
     def setUp(self):
         self.today = timezone.localdate()
+        # Freeze the clock at 06:30 IST on the trip's day. Booking and cancelling now depend on
+        # the time of day, so without this the tests would pass or fail depending on when they run.
+        patcher = patch('django.utils.timezone.now', return_value=self.at(1, 0))
+        self.mock_now = patcher.start()
+        self.addCleanup(patcher.stop)
         self.user = User.objects.create_user('alice', 'a@example.com', 'pass12345')
         self.other = User.objects.create_user('bob', 'b@example.com', 'pass12345')
         self.admin = User.objects.create_user('admin', 'admin@example.com', 'pass12345', is_staff=True)
@@ -193,14 +202,6 @@ class BusPermissionTests(BaseApiTest):
 
 
 class CancelBookingTests(BaseApiTest):
-    def setUp(self):
-        super().setUp()
-        # Freeze the clock at 06:30 IST on the trip's day (the bus leaves at 08:00 IST), so these
-        # tests give the same result whatever time of day they run.
-        patcher = patch('django.utils.timezone.now', return_value=self.at(1, 0))
-        self.mock_now = patcher.start()
-        self.addCleanup(patcher.stop)
-
     def make_booking(self, user=None, seat=None):
         self.auth(user or self.user)
         res = self.book(seat or self.seat)
@@ -209,10 +210,6 @@ class CancelBookingTests(BaseApiTest):
 
     def cancel(self, booking_id):
         return self.client.post(f'/api/booking/{booking_id}/cancel/', {}, format='json')
-
-    def at(self, hour, minute=0):
-        """A fixed UTC moment on the trip's day (bus departs 08:00 IST = 02:30 UTC)."""
-        return datetime(self.today.year, self.today.month, self.today.day, hour, minute, tzinfo=dt_timezone.utc)
 
     def test_cancel_frees_the_seat_and_keeps_history(self):
         booking_id = self.make_booking()
@@ -292,3 +289,45 @@ class CancelBookingTests(BaseApiTest):
         res = self.client.get(f'/api/user/{self.user.id}/bookings/')
         self.assertEqual(res.status_code, 200)
         self.assertEqual([b['status'] for b in res.data], ['confirmed', 'cancelled'])
+
+
+class DepartedBusTests(BaseApiTest):
+    def test_cannot_book_after_the_bus_has_left_today(self):
+        self.mock_now.return_value = self.at(3, 0)  # 08:30 IST, the bus left at 08:00
+        self.auth(self.user)
+        res = self.book(self.seat)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('departed', res.data['error'])
+        self.seat.refresh_from_db()
+        self.assertFalse(self.seat.is_booked)
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_booking_is_open_until_the_moment_of_departure(self):
+        self.auth(self.user)
+        self.mock_now.return_value = self.at(2, 29)  # 07:59 IST
+        self.assertEqual(self.book(self.seat).status_code, 201)
+        self.mock_now.return_value = self.at(2, 30)  # 08:00 IST exactly: the bus is leaving
+        other_seat = self.trip.seats.order_by('id')[1]
+        self.assertEqual(self.book(other_seat).status_code, 400)
+
+    def test_trip_list_and_detail_report_whether_the_bus_departed(self):
+        listed = self.client.get(f'/api/trips/?date={self.today}').data[0]
+        detail = self.client.get(f'/api/trips/{self.trip.id}/').data
+        self.assertFalse(listed['departed'])
+        self.assertFalse(detail['departed'])
+
+        self.mock_now.return_value = self.at(3, 0)  # 08:30 IST
+        listed = self.client.get(f'/api/trips/?date={self.today}').data[0]
+        detail = self.client.get(f'/api/trips/{self.trip.id}/').data
+        self.assertTrue(listed['departed'])
+        self.assertTrue(detail['departed'])
+
+    def test_a_bus_on_a_later_date_is_never_departed(self):
+        self.mock_now.return_value = self.at(20, 0)  # late in the evening, today
+        tomorrow = self.today + timedelta(days=1)
+        listed = self.client.get(f'/api/trips/?date={tomorrow}').data[0]
+        self.assertFalse(listed['departed'])
+        self.auth(self.user)
+        tomorrow_seat = Trip.objects.get(date=tomorrow, bus=self.bus).seats.order_by('id').first()
+        self.assertEqual(self.book(tomorrow_seat).status_code, 201)
+

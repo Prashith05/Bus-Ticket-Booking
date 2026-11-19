@@ -42,11 +42,16 @@ class TripSerializer(serializers.ModelSerializer):
     reach_time = serializers.TimeField(source='bus.reach_time', read_only=True)
     price = serializers.DecimalField(source='bus.price', max_digits=8, decimal_places=2, read_only=True)
     available_seats = serializers.IntegerField(read_only=True)
+    departed = serializers.SerializerMethodField()
+
+    def get_departed(self, trip):
+        # True once the bus has left: it can no longer be booked.
+        return has_departed(trip)
 
     class Meta:
         model = Trip
         fields = ['id', 'date', 'bus_id', 'bus_name', 'number', 'origin', 'destination',
-                  'features', 'start_time', 'reach_time', 'price', 'available_seats']
+                  'features', 'start_time', 'reach_time', 'price', 'available_seats', 'departed']
 
 
 class TripDetailSerializer(TripSerializer):
