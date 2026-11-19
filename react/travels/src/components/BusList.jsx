@@ -248,7 +248,8 @@ const BusList = () => {
                 <div style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 4 }}>per seat</div>
                 <div style={{
                   fontSize: 12, fontWeight: 700, marginBottom: 10,
-                  color: bus.booking_closed ? 'var(--text-muted)' : bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
+                  color: bus.booking_closed ? '#ef4444' : bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
+                  // color: bus.booking_closed ? 'var(--text-muted)' : bus.available_seats === 0 ? '#ef4444' : bus.available_seats <= 5 ? '#d97706' : 'var(--primary-dark)',
                 }}>
                   {bus.departed ? 'Departed' : bus.booking_closed ? 'Booking closed' : bus.available_seats === 0 ? 'Sold out' : `${bus.available_seats} seats left`}
                 </div>
