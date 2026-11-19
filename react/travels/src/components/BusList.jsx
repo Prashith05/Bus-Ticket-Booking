@@ -256,7 +256,11 @@ const BusList = () => {
                 {/* `bus` here is one trip (a bus on this date), so bus.id is the trip id */}
                 <button
                   className="btn btn-primary"
-                  style={{ padding: '10px 20px', fontSize: 14, cursor: bus.booking_closed ? 'not-allowed' : 'pointer' }}
+                  style={{
+                          padding: '10px 20px', fontSize: 14,
+                          cursor: bus.booking_closed ? 'not-allowed' : 'pointer',
+                          ...(bus.booking_closed && { background: '#ef4444', color: '#fff', boxShadow: 'none' }),
+                  }}
                   disabled={bus.booking_closed}
                   onClick={() => navigate(`/trip/${bus.id}`)}
                 >
