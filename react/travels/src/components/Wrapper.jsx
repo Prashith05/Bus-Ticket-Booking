@@ -37,7 +37,7 @@ const Wrapper = ({ token, handleLogout, children, userId }) => {
               boxShadow: '0 4px 12px var(--primary-glow)'
             }}>🚌</div>
             <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--text)' }}>
-              V-Travels
+              V-Travel
             </span>
           </Link>
 
