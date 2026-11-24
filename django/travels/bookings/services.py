@@ -19,6 +19,12 @@ def departure_datetime(trip):
 # paying or confirming when the bus pulls away can never end up with a seat that is not honoured.
 BOOKING_CUTOFF_MINUTES = 15
 
+# Seats one request may book, and seats one person may hold on the same bus and date (all their
+# bookings together, cancelled ones not counted). The second limit stops one person from booking
+# again and again to take the whole bus.
+MAX_SEATS_PER_BOOKING = 6
+MAX_SEATS_PER_USER_PER_TRIP = 6
+
 
 def booking_closes_at(trip):
     """The moment booking stops for this trip (timezone-aware)."""

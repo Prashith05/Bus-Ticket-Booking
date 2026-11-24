@@ -8,7 +8,7 @@ from rest_framework.test import APITestCase
 from rest_framework.authtoken.models import Token
 
 from .models import Bus, Trip, Seat, Booking
-from .services import BOOKING_WINDOW_DAYS
+from .services import BOOKING_WINDOW_DAYS, MAX_SEATS_PER_BOOKING, MAX_SEATS_PER_USER_PER_TRIP
 
 
 class BaseApiTest(APITestCase):
@@ -48,9 +48,10 @@ class BookingApiTests(BaseApiTest):
         self.auth(self.user)
         res = self.book(self.seat)
         self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.data['bus_name'], 'Express')
-        self.assertEqual(res.data['seat_number'], self.seat.seat_number)
-        self.assertEqual(str(res.data['travel_date']), str(self.today))
+        self.assertEqual(len(res.data), 1)  # the booking API always answers with a list
+        self.assertEqual(res.data[0]['bus_name'], 'Express')
+        self.assertEqual(res.data[0]['seat_number'], self.seat.seat_number)
+        self.assertEqual(str(res.data[0]['travel_date']), str(self.today))
         self.seat.refresh_from_db()
         self.assertTrue(self.seat.is_booked)
 
@@ -206,7 +207,7 @@ class CancelBookingTests(BaseApiTest):
         self.auth(user or self.user)
         res = self.book(seat or self.seat)
         self.assertEqual(res.status_code, 201)
-        return res.data['id']
+        return res.data[0]['id']
 
     def cancel(self, booking_id):
         return self.client.post(f'/api/booking/{booking_id}/cancel/', {}, format='json')
@@ -349,3 +350,137 @@ class DepartedBusTests(BaseApiTest):
         self.auth(self.user)
         tomorrow_seat = Trip.objects.get(date=tomorrow, bus=self.bus).seats.order_by('id').first()
         self.assertEqual(self.book(tomorrow_seat).status_code, 201)
+
+
+class MultiSeatBookingTests(BaseApiTest):
+    def setUp(self):
+        super().setUp()
+        # A bigger bus (10 seats, leaves at 09:00 IST) so the 6-seat limits can be tested.
+        big = Bus.objects.create(
+            bus_name='Big Bus', number='KA09', origin='Chennai', destination='Bangalore',
+            features='AC', start_time='09:00', reach_time='15:00', no_of_seats=10, price='200.00',
+        )
+        self.big_trip = Trip.objects.create(bus=big, date=self.today)
+        self.big_seats = list(self.big_trip.seats.order_by('id'))
+
+    def book_many(self, seats):
+        return self.client.post('/api/booking/', {'seats': [s.id for s in seats]}, format='json')
+
+    def confirmed(self, user):
+        return Booking.objects.filter(user=user, status='confirmed').count()
+
+    def test_limits_are_six(self):
+        self.assertEqual(MAX_SEATS_PER_BOOKING, 6)
+        self.assertEqual(MAX_SEATS_PER_USER_PER_TRIP, 6)
+
+    def test_books_several_seats_in_one_request(self):
+        self.auth(self.user)
+        res = self.book_many(self.big_seats[:3])
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual([b['seat_number'] for b in res.data], ['S1', 'S2', 'S3'])
+        self.assertTrue(all(b['bus_name'] == 'Big Bus' and b['status'] == 'confirmed' for b in res.data))
+        self.assertEqual(Booking.objects.count(), 3)
+        self.assertEqual(Seat.objects.filter(trip=self.big_trip, is_booked=True).count(), 3)
+
+    def test_all_or_nothing_when_one_seat_is_taken(self):
+        self.auth(self.other)
+        self.assertEqual(self.book_many([self.big_seats[1]]).status_code, 201)  # bob takes S2
+        self.auth(self.user)
+        res = self.book_many(self.big_seats[:3])  # alice asks for S1, S2, S3
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('S2', res.data['error'])
+        self.assertEqual(res.data['unavailable_seats'], [self.big_seats[1].id])
+        self.assertEqual(self.confirmed(self.user), 0)  # S1 and S3 were NOT booked
+        self.assertFalse(Seat.objects.get(id=self.big_seats[0].id).is_booked)
+        self.assertFalse(Seat.objects.get(id=self.big_seats[2].id).is_booked)
+
+    def test_more_than_six_seats_in_one_booking_is_refused(self):
+        self.auth(self.user)
+        res = self.book_many(self.big_seats[:MAX_SEATS_PER_BOOKING + 1])
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('6', res.data['error'])
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_exactly_six_seats_is_allowed(self):
+        self.auth(self.user)
+        self.assertEqual(self.book_many(self.big_seats[:6]).status_code, 201)
+        self.assertEqual(self.confirmed(self.user), 6)
+
+    def test_per_person_limit_counts_all_bookings_on_the_trip(self):
+        self.auth(self.user)
+        self.assertEqual(self.book_many(self.big_seats[:4]).status_code, 201)
+        res = self.book_many(self.big_seats[4:7])  # 4 + 3 = 7 > 6
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('already have 4', res.data['error'])
+        self.assertEqual(self.confirmed(self.user), 4)
+        self.assertEqual(self.book_many(self.big_seats[4:6]).status_code, 201)  # 4 + 2 = 6 is fine
+        self.assertEqual(self.book_many(self.big_seats[6:7]).status_code, 400)  # a 7th is not
+        # someone else can still book the remaining seats
+        self.auth(self.other)
+        self.assertEqual(self.book_many(self.big_seats[6:9]).status_code, 201)
+
+    def test_per_person_limit_is_per_trip(self):
+        tomorrow = Trip.objects.create(bus=self.big_trip.bus, date=self.today + timedelta(days=1))
+        self.auth(self.user)
+        self.assertEqual(self.book_many(self.big_seats[:6]).status_code, 201)
+        self.assertEqual(self.book_many(list(tomorrow.seats.order_by('id')[:6])).status_code, 201)
+
+    def test_cancelled_seats_do_not_count_toward_the_limit(self):
+        self.auth(self.user)
+        made = self.book_many(self.big_seats[:6]).data
+        self.assertEqual(self.book_many(self.big_seats[6:7]).status_code, 400)
+        self.assertEqual(self.client.post(f"/api/booking/{made[0]['id']}/cancel/", {}, format='json').status_code, 200)
+        self.assertEqual(self.book_many(self.big_seats[6:7]).status_code, 201)
+        self.assertEqual(self.confirmed(self.user), 6)
+
+    def test_cancel_one_of_several_seats_and_it_can_be_booked_again(self):
+        self.auth(self.user)
+        made = self.book_many(self.big_seats[:2]).data  # S1 and S2
+        self.client.post(f"/api/booking/{made[0]['id']}/cancel/", {}, format='json')  # cancel S1 only
+        self.assertFalse(Seat.objects.get(id=self.big_seats[0].id).is_booked)
+        self.assertTrue(Seat.objects.get(id=self.big_seats[1].id).is_booked)
+        self.assertEqual(Booking.objects.get(id=made[1]['id']).status, 'confirmed')
+        self.auth(self.other)
+        self.assertEqual(self.book_many([self.big_seats[0]]).status_code, 201)
+
+    def test_seats_from_different_trips_are_refused(self):
+        self.auth(self.user)
+        res = self.book_many([self.big_seats[0], self.seat])  # a seat of the big bus and one of the small bus
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('same bus and date', res.data['error'])
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_duplicate_and_empty_requests_are_refused(self):
+        self.auth(self.user)
+        dup = self.client.post('/api/booking/', {'seats': [self.big_seats[0].id, self.big_seats[0].id]}, format='json')
+        self.assertEqual(dup.status_code, 400)
+        for body in ({'seats': []}, {}):
+            self.assertEqual(self.client.post('/api/booking/', body, format='json').status_code, 400)
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_unknown_or_invalid_seat_ids_book_nothing(self):
+        self.auth(self.user)
+        for seats in ([self.big_seats[0].id, 99999], ['abc'], 'S1', [None]):
+            res = self.client.post('/api/booking/', {'seats': seats}, format='json')
+            self.assertEqual(res.status_code, 404, seats)
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertFalse(Seat.objects.get(id=self.big_seats[0].id).is_booked)
+
+    def test_old_single_seat_request_still_works(self):
+        self.auth(self.user)
+        res = self.client.post('/api/booking/', {'seat': self.big_seats[0].id}, format='json')
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(len(res.data), 1)
+
+    def test_several_seats_on_a_closed_trip_are_refused(self):
+        self.mock_now.return_value = self.at(3, 15)  # 08:45 IST: Big Bus leaves 09:00, booking closed at 08:45
+        self.auth(self.user)
+        res = self.book_many(self.big_seats[:2])
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('closed', res.data['error'])
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_booking_requires_login(self):
+        res = self.book_many(self.big_seats[:2])
+        self.assertEqual(res.status_code, 401)
+
