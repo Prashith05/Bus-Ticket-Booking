@@ -12,11 +12,14 @@ const prettyDate = (iso) => {
   })
 }
 
+// How many seats one booking may include (the server enforces the same limit).
+const MAX_SEATS_PER_BOOKING = 6
+
 // `bus` below is one trip: a bus on a specific date, with that date's own seats.
 const BusSeats = ({ token }) => {
   const [bus, setBus] = useState(null)
   const [seats, setSeats] = useState([])
-  const [selected, setSelected] = useState(null)
+  const [selected, setSelected] = useState([]) // ids of the seats the person has picked
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState(false)
   const [toast, setToast] = useState(null)
@@ -49,23 +52,42 @@ const BusSeats = ({ token }) => {
     setTimeout(() => setToast(null), 3500)
   }
 
+  // Tap a seat to pick it, tap again to un-pick it (up to MAX_SEATS_PER_BOOKING seats).
+  const toggleSeat = (seatId) => {
+    if (selected.includes(seatId)) {
+      setSelected(selected.filter(id => id !== seatId))
+    } else if (selected.length >= MAX_SEATS_PER_BOOKING) {
+      showToast(`You can select up to ${MAX_SEATS_PER_BOOKING} seats at a time`, 'error')
+    } else {
+      setSelected([...selected, seatId])
+    }
+  }
+
   const handleBook = async () => {
-    if (!selected || closed) return
+    if (selected.length === 0 || closed) return
     if (!token) {
-      showToast('Please login to book a seat', 'error')
+      showToast('Please login to book seats', 'error')
       setTimeout(() => navigate('/login'), 1200)
       return
     }
     setBooking(true)
+    const count = selected.length
     try {
       await api.post('/api/booking/',
-        { seat: selected },
+        { seats: selected },
         { headers: { Authorization: `Token ${token}` } }
       )
-      showToast('Booking confirmed! 🎉')
-      setSeats(prev => prev.map(s => s.id === selected ? { ...s, is_booked: true } : s))
-      setSelected(null)
+      showToast(count === 1 ? 'Booking confirmed! 🎉' : `${count} seats booked! 🎉`)
+      setSeats(prev => prev.map(s => selected.includes(s.id) ? { ...s, is_booked: true } : s))
+      setSelected([])
     } catch (error) {
+      // All or nothing: if someone else took some of the seats meanwhile, nothing was booked.
+      // Mark those seats as taken and keep the rest selected so the person can try again.
+      const taken = error.response?.data?.unavailable_seats
+      if (taken?.length) {
+        setSeats(prev => prev.map(s => taken.includes(s.id) ? { ...s, is_booked: true } : s))
+        setSelected(prev => prev.filter(id => !taken.includes(id)))
+      }
       showToast(error.response?.data?.error || 'Booking failed', 'error')
     } finally {
       setBooking(false)
@@ -74,7 +96,10 @@ const BusSeats = ({ token }) => {
 
   const formatTime = (t) => t ? t.slice(0, 5) : '--:--'
 
-  const selectedSeat = seats.find(s => s.id === selected)
+  // The picked seats in seat order (S1, S2, ...), and what they cost together.
+  const selectedSeats = seats.filter(s => selected.includes(s.id))
+  const pricePerSeat = Number(bus?.price || 53)
+  const total = (pricePerSeat * selectedSeats.length).toFixed(2)
   const available = seats.filter(s => !s.is_booked).length
   // Booking stops shortly before departure (the server enforces this too). For such a trip the
   // server does not send any seats, so we show a message instead of a seat map.
@@ -207,8 +232,8 @@ const BusSeats = ({ token }) => {
           ) : (
           /* Seat map */
           <div className="card" style={{ padding: 28 }}>
-            <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Select a Seat</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>Click on an available seat to select it</p>
+            <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Select Seats</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>Tap the seats you want. You can book up to {MAX_SEATS_PER_BOOKING} seats at a time.</p>
 
             {/* Legend */}
             <div style={{ display: 'flex', gap: 20, marginBottom: 24 }}>
@@ -249,14 +274,14 @@ const BusSeats = ({ token }) => {
                   <div key={ri} style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                     {row.map((seat, ci) => {
                       const isBooked = seat.is_booked
-                      const isSelected = selected === seat.id
+                      const isSelected = selected.includes(seat.id)
                       const isAisle = ci === 1 // gap after 2nd seat
                       return (
                         <React.Fragment key={seat.id}>
                           <button
                             className="seat-btn"
                             disabled={isBooked}
-                            onClick={() => setSelected(isSelected ? null : seat.id)}
+                            onClick={() => toggleSeat(seat.id)}
                             style={{
                               width: 48, height: 52,
                               borderRadius: 10,
@@ -291,12 +316,19 @@ const BusSeats = ({ token }) => {
           <div className="card" style={{ padding: 28 }}>
             <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, marginBottom: 20 }}>Booking Summary</h3>
 
-            {selectedSeat ? (
+            {selectedSeats.length > 0 ? (
               <>
                 <div style={{ background: 'var(--bg)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>SELECTED SEAT</div>
-                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 700, color: 'var(--text)' }}>
-                    Seat {selectedSeat.seat_number}
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 10 }}>
+                    SELECTED SEAT{selectedSeats.length > 1 ? 'S' : ''} ({selectedSeats.length}/{MAX_SEATS_PER_BOOKING})
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {selectedSeats.map(s => (
+                      <span key={s.id} style={{
+                        background: 'var(--accent)', color: '#fff', borderRadius: 8,
+                        padding: '6px 12px', fontWeight: 700, fontSize: 15,
+                      }}>{s.seat_number}</span>
+                    ))}
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
@@ -305,7 +337,8 @@ const BusSeats = ({ token }) => {
                     { label: 'Date', value: prettyDate(bus?.date) },
                     { label: 'Departure', value: formatTime(bus?.start_time) },
                     { label: 'Arrival', value: formatTime(bus?.reach_time) },
-                    { label: 'Price', value: `₹${bus?.price || '53'}` },
+                    { label: 'Price per seat', value: `₹${pricePerSeat.toFixed(2)}` },
+                    { label: 'Seats', value: selectedSeats.length },
                   ].map(({ label, value }) => (
                     <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                       <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -316,7 +349,7 @@ const BusSeats = ({ token }) => {
                 <div style={{ borderTop: '1px dashed var(--border)', paddingTop: 16, marginBottom: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontWeight: 700, fontSize: 15 }}>Total</span>
-                    <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, color: 'var(--primary)' }}>₹{bus?.price || '53'}</span>
+                    <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, color: 'var(--primary)' }}>₹{total}</span>
                   </div>
                 </div>
                 <button
@@ -325,13 +358,13 @@ const BusSeats = ({ token }) => {
                   disabled={booking}
                   style={{ fontSize: 16, padding: '14px 0', borderRadius: 12 }}
                 >
-                  {booking ? 'Booking…' : 'Confirm Booking'}
+                  {booking ? 'Booking…' : `Book ${selectedSeats.length} seat${selectedSeats.length > 1 ? 's' : ''}`}
                 </button>
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>💺</div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Select a seat to see your booking summary</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Select seats to see your booking summary</p>
               </div>
             )}
           </div>

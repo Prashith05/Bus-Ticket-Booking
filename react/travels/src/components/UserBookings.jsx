@@ -65,6 +65,21 @@ const UserBookings = ({ token, userId }) => {
     return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   }
 
+  // One card per bus and date: seats booked together (or separately) on the same trip are grouped,
+  // each with its own status and Cancel button. The server sends newest first, so the order is kept.
+  const groups = []
+  const byTrip = new Map()
+  bookings.forEach(b => {
+    let group = byTrip.get(b.trip)
+    if (!group) {
+      group = { trip: b.trip, seats: [] }
+      byTrip.set(b.trip, group)
+      groups.push(group)
+    }
+    group.seats.push(b)
+  })
+  groups.forEach(g => g.seats.sort((a, b) => a.seat - b.seat)) // seat order: S1, S2, ...
+
   if (!token) return (
     <div style={{ paddingTop: 80, textAlign: 'center' }}>
       <div style={{ fontSize: 52, marginBottom: 16 }}>🔐</div>
@@ -104,7 +119,7 @@ const UserBookings = ({ token, userId }) => {
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
             {[
-              { icon: '🎫', label: 'Total Bookings', value: bookings.length },
+              { icon: '🎫', label: 'Seats Booked', value: bookings.length },
               { icon: '✅', label: 'Confirmed', value: bookings.filter(b => b.status === 'confirmed').length },
               { icon: '🚌', label: 'Buses Taken', value: new Set(bookings.filter(b => b.status === 'confirmed').map(b => b.bus)).size },
             ].map(({ icon, label, value }) => (
@@ -132,59 +147,82 @@ const UserBookings = ({ token, userId }) => {
             </div>
           )}
 
-          {/* Booking list */}
+          {/* Booking list: one card per bus and date */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {bookings.map((booking, i) => (
-              <div key={booking.id || i} className="card" style={{ padding: '22px 28px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', opacity: booking.status === 'cancelled' ? 0.6 : 1 }}>
-                {/* Status dot */}
-                <div style={{
-                  width: 44, height: 44, borderRadius: 12,
-                  background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 22, flexShrink: 0,
-                }}>🎫</div>
-
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, color: 'var(--text)' }}>
-                    {booking.bus_name} — Seat {booking.seat_number}
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    {booking.origin} → {booking.destination} · {booking.start_time?.slice(0, 5)} - {booking.reach_time?.slice(0, 5)}
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>
-                    📅 Travel date: {formatTravelDate(booking.travel_date)}
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                    Booked: {formatDate(booking.booking_time)}
-                  </div>
-                  {booking.status === 'cancelled' && booking.cancelled_at && (
-                    <div style={{ fontSize: 13, color: '#b42318' }}>
-                      Cancelled: {formatDate(booking.cancelled_at)}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+            {groups.map(group => {
+              const first = group.seats[0]
+              const total = group.seats.length
+              const confirmed = group.seats.filter(b => b.status === 'confirmed').length
+              const allCancelled = confirmed === 0
+              const badge = allCancelled ? 'Cancelled ✕' : confirmed === total ? 'Confirmed ✓' : `${confirmed} of ${total} confirmed`
+              return (
+                <div key={group.trip} className="card" style={{ padding: '22px 28px', display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap', opacity: allCancelled ? 0.6 : 1 }}>
+                  {/* Ticket icon */}
                   <div style={{
-                    background: booking.status === 'cancelled' ? '#fdecea' : 'var(--primary-light)',
-                    color: booking.status === 'cancelled' ? '#b42318' : 'var(--primary-dark)',
+                    width: 44, height: 44, borderRadius: 12,
+                    background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22, flexShrink: 0,
+                  }}>🎫</div>
+
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4, color: 'var(--text)' }}>
+                      {first.bus_name} · {total} {total === 1 ? 'seat' : 'seats'}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                      {first.origin} → {first.destination} · {first.start_time?.slice(0, 5)} - {first.reach_time?.slice(0, 5)}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
+                      📅 Travel date: {formatTravelDate(first.travel_date)}
+                    </div>
+
+                    {/* One row per seat, each with its own status and Cancel button */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {group.seats.map(b => {
+                        const cancelled = b.status === 'cancelled'
+                        return (
+                          <div key={b.id} style={{
+                            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                            padding: '8px 12px', borderRadius: 10, background: 'var(--bg)',
+                          }}>
+                            <span style={{
+                              minWidth: 38, textAlign: 'center', fontWeight: 700, fontSize: 13,
+                              padding: '4px 8px', borderRadius: 8, background: '#fff', border: '1px solid var(--border)',
+                              color: cancelled ? 'var(--text-muted)' : 'var(--text)',
+                              textDecoration: cancelled ? 'line-through' : 'none',
+                            }}>{b.seat_number}</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: cancelled ? '#b42318' : 'var(--primary-dark)' }}>
+                              {cancelled ? 'Cancelled ✕' : 'Confirmed ✓'}
+                            </span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 150 }}>
+                              {cancelled && b.cancelled_at ? `Cancelled ${formatDate(b.cancelled_at)}` : `Booked ${formatDate(b.booking_time)}`}
+                            </span>
+                            {b.can_cancel && (
+                              <button
+                                className="btn"
+                                style={{ padding: '6px 14px', fontSize: 12, border: '1.5px solid #ef4444', color: '#ef4444', background: 'transparent', borderRadius: 8, cursor: cancellingId === b.id ? 'wait' : 'pointer' }}
+                                disabled={cancellingId === b.id}
+                                onClick={() => handleCancel(b)}
+                              >
+                                {cancellingId === b.id ? 'Cancelling…' : 'Cancel seat'}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    background: allCancelled ? '#fdecea' : 'var(--primary-light)',
+                    color: allCancelled ? '#b42318' : 'var(--primary-dark)',
                     borderRadius: 20, padding: '6px 14px',
                     fontSize: 12, fontWeight: 700,
                   }}>
-                    {booking.status === 'cancelled' ? 'Cancelled ✕' : 'Confirmed ✓'}
+                    {badge}
                   </div>
-                  {booking.can_cancel && (
-                    <button
-                      className="btn"
-                      style={{ padding: '8px 16px', fontSize: 13, border: '1.5px solid #ef4444', color: '#ef4444', background: 'transparent', borderRadius: 8, cursor: cancellingId === booking.id ? 'wait' : 'pointer' }}
-                      disabled={cancellingId === booking.id}
-                      onClick={() => handleCancel(booking)}
-                    >
-                      {cancellingId === booking.id ? 'Cancelling…' : 'Cancel ticket'}
-                    </button>
-                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </>
       )}
