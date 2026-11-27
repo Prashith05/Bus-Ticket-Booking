@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.utils import timezone
@@ -58,3 +59,58 @@ def ensure_trips(date):
     if date < today or date > today + timedelta(days=BOOKING_WINDOW_DAYS):
         return
     create_trips_for_date(date)
+
+
+# ---------------------------------------------------------------- passenger details
+GENDER_CODES = ('M', 'F', 'O')
+MIN_PASSENGER_AGE, MAX_PASSENGER_AGE = 1, 120
+_PHONE_RE = re.compile(r'^[6-9]\d{9}$')          # Indian mobile number: 10 digits starting with 6-9
+
+
+class PassengerError(ValueError):
+    """The passenger details in a booking request are missing or invalid (message is user-facing)."""
+
+
+def clean_phone(value):
+    """'+91 98765 43210' / '098765-43210' / '9876543210' -> '9876543210'. Raises PassengerError."""
+    digits = re.sub(r'[\s\-]', '', str(value or ''))
+    if digits.startswith('+91'):
+        digits = digits[3:]
+    elif len(digits) == 12 and digits.startswith('91'):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith('0'):
+        digits = digits[1:]
+    if not _PHONE_RE.match(digits):
+        raise PassengerError('Please enter a valid 10-digit mobile number.')
+    return digits
+
+
+def clean_passenger(raw, position):
+    """Validate one passenger {"name", "age", "gender"}; `position` (1, 2, ...) is used in messages."""
+    who = f'Passenger {position}'
+    if not isinstance(raw, dict):
+        raise PassengerError(f'{who}: details are missing.')
+
+    name = ' '.join(str(raw.get('name') or '').split())       # trim and collapse spaces
+    if len(name) < 2:
+        raise PassengerError(f'{who}: please enter the full name.')
+    if len(name) > 100:
+        raise PassengerError(f'{who}: the name is too long (100 letters at most).')
+    if not re.search(r'[^\W\d_]', name) or re.search(r'[<>]', name):
+        raise PassengerError(f'{who}: the name must contain letters and no special symbols.')
+
+    age = raw.get('age')
+    if isinstance(age, bool) or isinstance(age, float) or age in (None, ''):
+        raise PassengerError(f'{who}: please enter the age.')
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        raise PassengerError(f'{who}: the age must be a whole number.')
+    if not MIN_PASSENGER_AGE <= age <= MAX_PASSENGER_AGE:
+        raise PassengerError(f'{who}: the age must be between {MIN_PASSENGER_AGE} and {MAX_PASSENGER_AGE}.')
+
+    gender = str(raw.get('gender') or '').strip().upper()
+    if gender not in GENDER_CODES:
+        raise PassengerError(f'{who}: please choose the gender.')
+
+    return {'name': name, 'age': age, 'gender': gender}

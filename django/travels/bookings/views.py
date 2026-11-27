@@ -17,6 +17,7 @@ from .models import Bus,Seat,Booking,Trip
 from .services import (
     ensure_trips, has_departed, is_booking_closed, BOOKING_CUTOFF_MINUTES,
     MAX_SEATS_PER_BOOKING, MAX_SEATS_PER_USER_PER_TRIP,
+    PassengerError, clean_passenger, clean_phone,
 )
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -116,37 +117,50 @@ def _bad_request(message, **extra):
     return Response({'error': message, **extra}, status=status.HTTP_400_BAD_REQUEST)
 
 
-def _seat_ids_from(data):
-    """The seat ids a booking request asks for: {"seats": [1, 2, 3]}, or the older {"seat": 1}.
-    Returns a list of ints, or None when nothing was sent. A non-number raises ValueError."""
-    if hasattr(data, 'getlist'):          # form-encoded body
-        raw = data.getlist('seats') or ([data.get('seat')] if data.get('seat') not in (None, '') else None)
-    else:
-        raw = data.get('seats')
-        if raw is None and data.get('seat') is not None:
-            raw = [data.get('seat')]
+class InvalidSeatId(ValueError):
+    """A seat id in the request is not a number."""
+
+
+def _parse_booking_request(data):
+    """Read {"contact_phone": "...", "passengers": [{"seat": id, "name", "age", "gender"}, ...]}.
+    Returns (seat_ids, passengers_by_seat_id, phone). Raises InvalidSeatId or PassengerError."""
+    raw = data.get('passengers') if hasattr(data, 'get') else None
     if raw is None:
-        return None
+        raise PassengerError('Passenger details are required: send a name, age and gender for every seat.')
     if not isinstance(raw, (list, tuple)):
-        raise ValueError('seats must be a list')
-    ids = []
-    for item in raw:
-        if isinstance(item, bool):
-            raise ValueError('not a seat id')
-        ids.append(int(item))
-    return ids
+        raise PassengerError('passengers must be a list.')
+
+    seat_ids, details = [], {}
+    for position, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise PassengerError(f'Passenger {position}: details are missing.')
+        seat = item.get('seat')
+        if isinstance(seat, bool) or seat in (None, ''):
+            raise InvalidSeatId('not a seat id')
+        try:
+            seat_id = int(seat)
+        except (TypeError, ValueError):
+            raise InvalidSeatId('not a seat id')
+        seat_ids.append(seat_id)
+        details[seat_id] = item          # validated later, once we know the request is otherwise sane
+
+    return seat_ids, details, data.get('contact_phone')
 
 
 class BookingView(APIView):
-    """POST /api/booking/ {"seats": [id, ...]} - book one or several seats of ONE trip.
+    """POST /api/booking/ - book one or several seats of ONE trip, with the passenger for each seat:
+        {"contact_phone": "9876543210",
+         "passengers": [{"seat": 12, "name": "Ravi Kumar", "age": 34, "gender": "M"}, ...]}
     All or nothing: if any seat cannot be booked, none are."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
-            seat_ids = _seat_ids_from(request.data)
-        except (ValueError, TypeError):
+            seat_ids, raw_details, raw_phone = _parse_booking_request(request.data)
+        except InvalidSeatId:
             return Response({'error': 'Invalid Seat ID'}, status=status.HTTP_404_NOT_FOUND)
+        except PassengerError as exc:
+            return _bad_request(str(exc))
 
         if not seat_ids:
             return _bad_request('Please choose at least one seat.')
@@ -154,6 +168,14 @@ class BookingView(APIView):
             return _bad_request('The same seat was chosen more than once.')
         if len(seat_ids) > MAX_SEATS_PER_BOOKING:
             return _bad_request(f'You can book at most {MAX_SEATS_PER_BOOKING} seats at a time.')
+
+        # Check the passenger details before touching the database.
+        try:
+            passengers = {sid: clean_passenger(raw_details[sid], i)
+                          for i, sid in enumerate(seat_ids, start=1)}
+            phone = clean_phone(raw_phone)
+        except PassengerError as exc:
+            return _bad_request(str(exc))
 
         with transaction.atomic():
             # Lock this person's row first, so two requests from the same person run one after the
@@ -203,7 +225,10 @@ class BookingView(APIView):
             for seat in seats:
                 seat.is_booked = True
                 seat.save(update_fields=['is_booked'])
-                bookings.append(Booking.objects.create(user=request.user, trip=trip, seat=seat))
+                who = passengers[seat.id]
+                bookings.append(Booking.objects.create(
+                    user=request.user, trip=trip, seat=seat, contact_phone=phone,
+                    passenger_name=who['name'], passenger_age=who['age'], passenger_gender=who['gender']))
 
         return Response(BookingSerializer(bookings, many=True).data, status=status.HTTP_201_CREATED)
 

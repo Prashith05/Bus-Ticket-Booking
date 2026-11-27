@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react'
 import api from '../api.js' // Import the custom axios instance
 import { Link } from 'react-router-dom'
 
+const GENDER_LABELS = { M: 'Male', F: 'Female', O: 'Other' }
+
 const UserBookings = ({ token, userId }) => {
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(true)
@@ -174,6 +176,11 @@ const UserBookings = ({ token, userId }) => {
                     <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
                       📅 Travel date: {formatTravelDate(first.travel_date)}
                     </div>
+                    {first.contact_phone && (
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -8, marginBottom: 12 }}>
+                        📞 Contact: {first.contact_phone}
+                      </div>
+                    )}
 
                     {/* One row per seat, each with its own status and Cancel button */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -190,6 +197,12 @@ const UserBookings = ({ token, userId }) => {
                               color: cancelled ? 'var(--text-muted)' : 'var(--text)',
                               textDecoration: cancelled ? 'line-through' : 'none',
                             }}>{b.seat_number}</span>
+                            {/* Who is travelling (bookings made before passenger details existed have none) */}
+                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', minWidth: 130, textDecoration: cancelled ? 'line-through' : 'none' }}>
+                              {b.passenger_name
+                                ? `${b.passenger_name} · ${b.passenger_age} · ${GENDER_LABELS[b.passenger_gender] || ''}`
+                                : <span style={{ color: 'var(--text-light)', fontWeight: 500 }}>No passenger name</span>}
+                            </span>
                             <span style={{ fontSize: 12, fontWeight: 700, color: cancelled ? '#b42318' : 'var(--primary-dark)' }}>
                               {cancelled ? 'Cancelled ✕' : 'Confirmed ✓'}
                             </span>
