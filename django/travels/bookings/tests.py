@@ -12,6 +12,7 @@ from .services import BOOKING_WINDOW_DAYS, MAX_SEATS_PER_BOOKING, MAX_SEATS_PER_
 
 
 PHONE = '9876543210'
+EMAIL = 'ravi@example.com'
 
 
 def passenger(seat_id, **over):
@@ -21,7 +22,7 @@ def passenger(seat_id, **over):
 
 def booking_body(seat_ids, **over):
     """A valid booking request body for these seat ids."""
-    return {'contact_phone': PHONE, 'passengers': [passenger(i) for i in seat_ids], **over}
+    return {'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': [passenger(i) for i in seat_ids], **over}
 
 
 class BaseApiTest(APITestCase):
@@ -467,17 +468,17 @@ class MultiSeatBookingTests(BaseApiTest):
         self.auth(self.user)
         dup = self.client.post('/api/booking/', booking_body([self.big_seats[0].id, self.big_seats[0].id]), format='json')
         self.assertEqual(dup.status_code, 400)
-        for body in ({'contact_phone': PHONE, 'passengers': []}, {}):
+        for body in ({'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': []}, {}):
             self.assertEqual(self.client.post('/api/booking/', body, format='json').status_code, 400)
         self.assertEqual(Booking.objects.count(), 0)
 
     def test_unknown_or_invalid_seat_ids_book_nothing(self):
         self.auth(self.user)
         for seats in ([self.big_seats[0].id, 99999], ['abc'], [None], [True]):
-            body = {'contact_phone': PHONE, 'passengers': [passenger(sid) for sid in seats]}
+            body = booking_body(seats)
             res = self.client.post('/api/booking/', body, format='json')
             self.assertEqual(res.status_code, 404, seats)
-        res = self.client.post('/api/booking/', {'contact_phone': PHONE, 'passengers': 'S1'}, format='json')
+        res = self.client.post('/api/booking/', {'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': 'S1'}, format='json')
         self.assertEqual(res.status_code, 400)
         self.assertEqual(Booking.objects.count(), 0)
         self.assertFalse(Seat.objects.get(id=self.big_seats[0].id).is_booked)
@@ -515,8 +516,9 @@ class PassengerDetailTests(BaseApiTest):
         self.s = list(self.big.seats.order_by('id'))
         self.auth(self.user)
 
-    def post(self, passengers, phone=PHONE):
-        return self.client.post('/api/booking/', {'contact_phone': phone, 'passengers': passengers}, format='json')
+    def post(self, passengers, phone=PHONE, email=EMAIL):
+        return self.client.post('/api/booking/', {'contact_phone': phone, 'contact_email': email,
+                                                  'passengers': passengers}, format='json')
 
     def assert_refused(self, res, text):
         self.assertEqual(res.status_code, 400, res.data)
@@ -568,6 +570,16 @@ class PassengerDetailTests(BaseApiTest):
         for bad in (None, '', '12345', '5876543210', 'abcdefghij', '98765432101234'):
             self.assert_refused(self.post([passenger(self.s[0].id)], phone=bad), 'mobile number')
 
+    def test_email_is_required_and_validated(self):
+        for bad in (None, '', '   ', 'ravi', 'ravi@', '@example.com', 'a b@example.com', 'ravi@example', 'x' * 250 + '@e.com'):
+            self.assert_refused(self.post([passenger(self.s[0].id)], email=bad), 'email')
+
+    def test_email_is_tidied_and_stored_on_every_seat(self):
+        res = self.post([passenger(self.s[0].id), passenger(self.s[1].id)], email='  Ravi.K@Example.COM ')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual({b['contact_email'] for b in res.data}, {'ravi.k@example.com'})
+        self.assertEqual(self.client.get(f'/api/user/{self.user.id}/bookings/').data[0]['contact_email'], 'ravi.k@example.com')
+
     def test_phone_formats_are_normalised(self):
         for i, ok in enumerate(('+91 98765 43210', '098765-43210', '919876543210', '9876543210')):
             res = self.post([passenger(self.s[i].id)], phone=ok)
@@ -602,4 +614,5 @@ class PassengerDetailTests(BaseApiTest):
         res = self.client.get(f'/api/user/{self.user.id}/bookings/')
         self.assertEqual(res.status_code, 200)
         self.assertEqual((res.data[0]['passenger_name'], res.data[0]['passenger_age'],
-                          res.data[0]['passenger_gender'], res.data[0]['contact_phone']), ('', None, '', ''))
+                          res.data[0]['passenger_gender'], res.data[0]['contact_phone'], res.data[0]['contact_email']),
+                         ('', None, '', '', ''))

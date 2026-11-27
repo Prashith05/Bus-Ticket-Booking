@@ -37,8 +37,11 @@ const checkPhone = (v) => {
   return /^[6-9]\d{9}$/.test(digits) ? null : 'Enter a valid 10-digit mobile number'
 }
 
-const savedPhone = () => {
-  try { return localStorage.getItem('contactPhone') || '' } catch { return '' }
+const checkEmail = (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim()) ? null : 'Enter a valid email address')
+
+// The phone and email used last time are remembered in this browser (not important if that fails).
+const saved = (key) => {
+  try { return localStorage.getItem(key) || '' } catch { return '' }
 }
 
 const fieldErrStyle = { color: '#ef4444', fontSize: 11, fontWeight: 600, marginTop: 4 }
@@ -50,7 +53,8 @@ const BusSeats = ({ token }) => {
   const [seats, setSeats] = useState([])
   const [selected, setSelected] = useState([]) // ids of the seats the person has picked
   const [passengers, setPassengers] = useState({}) // seat id -> { name, age, gender }
-  const [phone, setPhone] = useState(savedPhone)
+  const [phone, setPhone] = useState(() => saved('contactPhone'))
+  const [email, setEmail] = useState(() => saved('contactEmail'))
   const [showErrors, setShowErrors] = useState(false) // show field problems after the first Book click
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState(false)
@@ -107,7 +111,7 @@ const BusSeats = ({ token }) => {
     }
     // Every picked seat needs a passenger, and we need one contact number.
     const orderedIds = seats.filter(s => selected.includes(s.id)).map(s => s.id)
-    if (checkPhone(phone) || orderedIds.some(id => checkPassenger(passengers[id]))) {
+    if (checkPhone(phone) || checkEmail(email) || orderedIds.some(id => checkPassenger(passengers[id]))) {
       setShowErrors(true)
       showToast('Please fill in the passenger details', 'error')
       document.getElementById('passenger-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -119,6 +123,7 @@ const BusSeats = ({ token }) => {
       await api.post('/api/booking/',
         {
           contact_phone: phone.trim(),
+          contact_email: email.trim(),
           passengers: orderedIds.map(id => ({
             seat: id,
             name: cleanName(passengers[id].name),
@@ -128,7 +133,7 @@ const BusSeats = ({ token }) => {
         },
         { headers: { Authorization: `Token ${token}` } }
       )
-      try { localStorage.setItem('contactPhone', phone.trim()) } catch { /* private mode: not important */ }
+      try { localStorage.setItem('contactPhone', phone.trim()); localStorage.setItem('contactEmail', email.trim()) } catch { /* private mode: not important */ }
       setShowErrors(false)
       setPassengers(prev => {
         const rest = { ...prev }
@@ -425,7 +430,20 @@ const BusSeats = ({ token }) => {
                 })}
               </div>
 
-              <div className="input-group" style={{ marginTop: 20, maxWidth: 320 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginTop: 20 }}>
+              <div className="input-group">
+                <label className="input-label" htmlFor="contact-email">Email address</label>
+                <input
+                  id="contact-email" className="input-field" style={invalid(showErrors && checkEmail(email))}
+                  type="email" inputMode="email" maxLength={254} placeholder="you@example.com"
+                  value={email} onChange={e => setEmail(e.target.value)}
+                />
+                {showErrors && checkEmail(email) && <div style={fieldErrStyle}>{checkEmail(email)}</div>}
+                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
+                  Your ticket and trip updates are sent here.
+                </div>
+              </div>
+              <div className="input-group">
                 <label className="input-label" htmlFor="contact-phone">Contact mobile number</label>
                 <input
                   id="contact-phone" className="input-field" style={invalid(showErrors && checkPhone(phone))}
@@ -436,6 +454,7 @@ const BusSeats = ({ token }) => {
                 <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
                   We use this to reach you about this trip.
                 </div>
+              </div>
               </div>
             </div>
           )}

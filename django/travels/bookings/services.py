@@ -1,6 +1,8 @@
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.utils import timezone
 
 from .models import Bus, Trip
@@ -65,6 +67,18 @@ def ensure_trips(date):
 GENDER_CODES = ('M', 'F', 'O')
 MIN_PASSENGER_AGE, MAX_PASSENGER_AGE = 1, 120
 _PHONE_RE = re.compile(r'^[6-9]\d{9}$')          # Indian mobile number: 10 digits starting with 6-9
+
+
+def clean_email(value):
+    """' Ravi@Example.COM ' -> 'ravi@example.com'. Raises PassengerError when it is not an email address."""
+    email = str(value or '').strip().lower()
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise PassengerError('Please enter a valid email address.')
+    if len(email) > 254:
+        raise PassengerError('Please enter a valid email address.')
+    return email
 
 
 class PassengerError(ValueError):

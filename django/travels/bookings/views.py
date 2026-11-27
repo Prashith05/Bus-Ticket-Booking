@@ -17,7 +17,7 @@ from .models import Bus,Seat,Booking,Trip
 from .services import (
     ensure_trips, has_departed, is_booking_closed, BOOKING_CUTOFF_MINUTES,
     MAX_SEATS_PER_BOOKING, MAX_SEATS_PER_USER_PER_TRIP,
-    PassengerError, clean_passenger, clean_phone,
+    PassengerError, clean_passenger, clean_phone, clean_email,
 )
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -144,19 +144,19 @@ def _parse_booking_request(data):
         seat_ids.append(seat_id)
         details[seat_id] = item          # validated later, once we know the request is otherwise sane
 
-    return seat_ids, details, data.get('contact_phone')
+    return seat_ids, details, data.get('contact_phone'), data.get('contact_email')
 
 
 class BookingView(APIView):
     """POST /api/booking/ - book one or several seats of ONE trip, with the passenger for each seat:
-        {"contact_phone": "9876543210",
+        {"contact_phone": "9876543210", "contact_email": "ravi@example.com",
          "passengers": [{"seat": 12, "name": "Ravi Kumar", "age": 34, "gender": "M"}, ...]}
     All or nothing: if any seat cannot be booked, none are."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
-            seat_ids, raw_details, raw_phone = _parse_booking_request(request.data)
+            seat_ids, raw_details, raw_phone, raw_email = _parse_booking_request(request.data)
         except InvalidSeatId:
             return Response({'error': 'Invalid Seat ID'}, status=status.HTTP_404_NOT_FOUND)
         except PassengerError as exc:
@@ -174,6 +174,7 @@ class BookingView(APIView):
             passengers = {sid: clean_passenger(raw_details[sid], i)
                           for i, sid in enumerate(seat_ids, start=1)}
             phone = clean_phone(raw_phone)
+            email = clean_email(raw_email)
         except PassengerError as exc:
             return _bad_request(str(exc))
 
@@ -227,7 +228,7 @@ class BookingView(APIView):
                 seat.save(update_fields=['is_booked'])
                 who = passengers[seat.id]
                 bookings.append(Booking.objects.create(
-                    user=request.user, trip=trip, seat=seat, contact_phone=phone,
+                    user=request.user, trip=trip, seat=seat, contact_phone=phone, contact_email=email,
                     passenger_name=who['name'], passenger_age=who['age'], passenger_gender=who['gender']))
 
         return Response(BookingSerializer(bookings, many=True).data, status=status.HTTP_201_CREATED)

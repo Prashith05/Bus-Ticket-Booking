@@ -176,9 +176,9 @@ const UserBookings = ({ token, userId }) => {
                     <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
                       📅 Travel date: {formatTravelDate(first.travel_date)}
                     </div>
-                    {first.contact_phone && (
+                    {(first.contact_phone || first.contact_email) && (
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -8, marginBottom: 12 }}>
-                        📞 Contact: {first.contact_phone}
+                        📞 Contact: {[first.contact_phone, first.contact_email].filter(Boolean).join(' · ')}
                       </div>
                     )}
 

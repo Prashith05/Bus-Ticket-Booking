@@ -67,6 +67,8 @@ class Booking(models.Model):
     passenger_gender = models.CharField(max_length=1, choices=GENDER_CHOICES, blank=True, default='')
     # One contact number per booking request; it is repeated on each seat's row of that request.
     contact_phone = models.CharField(max_length=15, blank=True, default='')
+    # Where the ticket and trip updates are sent (also one per booking request).
+    contact_email = models.EmailField(blank=True, default='')
 
     def __str__(self):
         bus = self.trip.bus
