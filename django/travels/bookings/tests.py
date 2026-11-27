@@ -11,6 +11,20 @@ from .models import Bus, Trip, Seat, Booking
 from .services import BOOKING_WINDOW_DAYS, MAX_SEATS_PER_BOOKING, MAX_SEATS_PER_USER_PER_TRIP
 
 
+PHONE = '9876543210'
+EMAIL = 'ravi@example.com'
+
+
+def passenger(seat_id, **over):
+    """One passenger entry of a booking request (valid unless overridden)."""
+    return {'seat': seat_id, 'name': 'Ravi Kumar', 'age': 34, 'gender': 'M', **over}
+
+
+def booking_body(seat_ids, **over):
+    """A valid booking request body for these seat ids."""
+    return {'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': [passenger(i) for i in seat_ids], **over}
+
+
 class BaseApiTest(APITestCase):
     def at(self, hour, minute=0):
         """A fixed UTC moment on the trip's day (the bus departs 08:00 IST = 02:30 UTC)."""
@@ -40,7 +54,7 @@ class BaseApiTest(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
     def book(self, seat):
-        return self.client.post('/api/booking/', {'seat': seat.id}, format='json')
+        return self.client.post('/api/booking/', booking_body([seat.id]), format='json')
 
 
 class BookingApiTests(BaseApiTest):
@@ -65,7 +79,7 @@ class BookingApiTests(BaseApiTest):
 
     def test_invalid_seat_returns_404(self):
         self.auth(self.user)
-        res = self.client.post('/api/booking/', {'seat': 99999}, format='json')
+        res = self.client.post('/api/booking/', booking_body([99999]), format='json')
         self.assertEqual(res.status_code, 404)
 
     def test_booking_requires_login(self):
@@ -364,7 +378,7 @@ class MultiSeatBookingTests(BaseApiTest):
         self.big_seats = list(self.big_trip.seats.order_by('id'))
 
     def book_many(self, seats):
-        return self.client.post('/api/booking/', {'seats': [s.id for s in seats]}, format='json')
+        return self.client.post('/api/booking/', booking_body([s.id for s in seats]), format='json')
 
     def confirmed(self, user):
         return Booking.objects.filter(user=user, status='confirmed').count()
@@ -452,25 +466,30 @@ class MultiSeatBookingTests(BaseApiTest):
 
     def test_duplicate_and_empty_requests_are_refused(self):
         self.auth(self.user)
-        dup = self.client.post('/api/booking/', {'seats': [self.big_seats[0].id, self.big_seats[0].id]}, format='json')
+        dup = self.client.post('/api/booking/', booking_body([self.big_seats[0].id, self.big_seats[0].id]), format='json')
         self.assertEqual(dup.status_code, 400)
-        for body in ({'seats': []}, {}):
+        for body in ({'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': []}, {}):
             self.assertEqual(self.client.post('/api/booking/', body, format='json').status_code, 400)
         self.assertEqual(Booking.objects.count(), 0)
 
     def test_unknown_or_invalid_seat_ids_book_nothing(self):
         self.auth(self.user)
-        for seats in ([self.big_seats[0].id, 99999], ['abc'], 'S1', [None]):
-            res = self.client.post('/api/booking/', {'seats': seats}, format='json')
+        for seats in ([self.big_seats[0].id, 99999], ['abc'], [None], [True]):
+            body = booking_body(seats)
+            res = self.client.post('/api/booking/', body, format='json')
             self.assertEqual(res.status_code, 404, seats)
+        res = self.client.post('/api/booking/', {'contact_phone': PHONE, 'contact_email': EMAIL, 'passengers': 'S1'}, format='json')
+        self.assertEqual(res.status_code, 400)
         self.assertEqual(Booking.objects.count(), 0)
         self.assertFalse(Seat.objects.get(id=self.big_seats[0].id).is_booked)
 
-    def test_old_single_seat_request_still_works(self):
+    def test_old_request_without_passenger_details_is_refused(self):
         self.auth(self.user)
-        res = self.client.post('/api/booking/', {'seat': self.big_seats[0].id}, format='json')
-        self.assertEqual(res.status_code, 201)
-        self.assertEqual(len(res.data), 1)
+        for body in ({'seat': self.big_seats[0].id}, {'seats': [self.big_seats[0].id]}):
+            res = self.client.post('/api/booking/', body, format='json')
+            self.assertEqual(res.status_code, 400)
+            self.assertIn('Passenger details are required', res.data['error'])
+        self.assertEqual(Booking.objects.count(), 0)
 
     def test_several_seats_on_a_closed_trip_are_refused(self):
         self.mock_now.return_value = self.at(3, 15)  # 08:45 IST: Big Bus leaves 09:00, booking closed at 08:45
@@ -484,3 +503,116 @@ class MultiSeatBookingTests(BaseApiTest):
         res = self.book_many(self.big_seats[:2])
         self.assertEqual(res.status_code, 401)
 
+
+
+class PassengerDetailTests(BaseApiTest):
+    def setUp(self):
+        super().setUp()
+        self.big = Trip.objects.create(
+            bus=Bus.objects.create(bus_name='Big Bus', number='KA09', origin='Chennai', destination='Bangalore',
+                                   features='AC', start_time='09:00', reach_time='15:00', no_of_seats=10,
+                                   price='200.00'),
+            date=self.today)
+        self.s = list(self.big.seats.order_by('id'))
+        self.auth(self.user)
+
+    def post(self, passengers, phone=PHONE, email=EMAIL):
+        return self.client.post('/api/booking/', {'contact_phone': phone, 'contact_email': email,
+                                                  'passengers': passengers}, format='json')
+
+    def assert_refused(self, res, text):
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn(text, res.data['error'])
+        self.assertEqual(Booking.objects.count(), 0)
+        self.assertFalse(Seat.objects.filter(is_booked=True).exists())
+
+    def test_each_seat_stores_its_own_passenger(self):
+        res = self.post([
+            passenger(self.s[0].id, name='Ravi Kumar', age=34, gender='M'),
+            passenger(self.s[1].id, name='Asha  Devi ', age=31, gender='f'),
+            passenger(self.s[2].id, name='Kid', age=7, gender='O'),
+        ])
+        self.assertEqual(res.status_code, 201, res.data)
+        got = {b['seat_number']: b for b in res.data}
+        self.assertEqual(got[self.s[1].seat_number]['passenger_name'], 'Asha Devi')   # spaces tidied
+        self.assertEqual(got[self.s[1].seat_number]['passenger_gender'], 'F')         # upper-cased
+        self.assertEqual(got[self.s[2].seat_number]['passenger_age'], 7)
+        self.assertTrue(all(b['contact_phone'] == PHONE for b in res.data))
+        row = Booking.objects.get(seat=self.s[0])
+        self.assertEqual((row.passenger_name, row.passenger_age, row.passenger_gender, row.contact_phone),
+                         ('Ravi Kumar', 34, 'M', PHONE))
+
+    def test_details_show_up_in_my_bookings(self):
+        self.post([passenger(self.s[0].id, name='Meena')])
+        res = self.client.get(f'/api/user/{self.user.id}/bookings/')
+        self.assertEqual(res.data[0]['passenger_name'], 'Meena')
+        self.assertEqual(res.data[0]['contact_phone'], PHONE)
+
+    def test_missing_or_bad_name(self):
+        for bad in ('', '   ', 'A', None, '1234', '<b>x</b>', 'x' * 101):
+            self.assert_refused(self.post([passenger(self.s[0].id, name=bad)]), 'Passenger 1')
+
+    def test_missing_or_bad_age(self):
+        for bad in (None, '', 0, -3, 121, 'abc', 12.5, True):
+            self.assert_refused(self.post([passenger(self.s[0].id, age=bad)]), 'age')
+        res = self.post([passenger(self.s[0].id, age='34')])      # a number sent as text is fine
+        self.assertEqual(res.status_code, 201)
+
+    def test_missing_or_bad_gender(self):
+        for bad in (None, '', 'X', 'male'):
+            self.assert_refused(self.post([passenger(self.s[0].id, gender=bad)]), 'gender')
+
+    def test_error_names_the_passenger_with_the_problem(self):
+        res = self.post([passenger(self.s[0].id), passenger(self.s[1].id, age=0)])
+        self.assert_refused(res, 'Passenger 2')
+
+    def test_phone_is_required_and_validated(self):
+        for bad in (None, '', '12345', '5876543210', 'abcdefghij', '98765432101234'):
+            self.assert_refused(self.post([passenger(self.s[0].id)], phone=bad), 'mobile number')
+
+    def test_email_is_required_and_validated(self):
+        for bad in (None, '', '   ', 'ravi', 'ravi@', '@example.com', 'a b@example.com', 'ravi@example', 'x' * 250 + '@e.com'):
+            self.assert_refused(self.post([passenger(self.s[0].id)], email=bad), 'email')
+
+    def test_email_is_tidied_and_stored_on_every_seat(self):
+        res = self.post([passenger(self.s[0].id), passenger(self.s[1].id)], email='  Ravi.K@Example.COM ')
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual({b['contact_email'] for b in res.data}, {'ravi.k@example.com'})
+        self.assertEqual(self.client.get(f'/api/user/{self.user.id}/bookings/').data[0]['contact_email'], 'ravi.k@example.com')
+
+    def test_phone_formats_are_normalised(self):
+        for i, ok in enumerate(('+91 98765 43210', '098765-43210', '919876543210', '9876543210')):
+            res = self.post([passenger(self.s[i].id)], phone=ok)
+            self.assertEqual(res.status_code, 201, ok)
+            self.assertEqual(res.data[0]['contact_phone'], '9876543210')
+
+    def test_bad_details_for_one_seat_book_none_of_them(self):
+        self.assert_refused(self.post([passenger(self.s[0].id), passenger(self.s[1].id, name='')]), 'Passenger 2')
+
+    def test_non_object_passenger_entries(self):
+        for bad in ([None], ['S1'], [5]):
+            self.assert_refused(self.post(bad), 'Passenger 1')
+
+    def test_cancelling_keeps_the_passenger_details(self):
+        booking_id = self.post([passenger(self.s[0].id, name='Meena')]).data[0]['id']
+        res = self.client.post(f'/api/booking/{booking_id}/cancel/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['passenger_name'], 'Meena')
+
+    def test_rebooking_a_cancelled_seat_stores_the_new_passenger(self):
+        first = self.post([passenger(self.s[0].id, name='Meena')]).data[0]['id']
+        self.client.post(f'/api/booking/{first}/cancel/')
+        self.auth(self.other)
+        res = self.post([passenger(self.s[0].id, name='Suresh', age=50)])
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(Booking.objects.get(pk=first).passenger_name, 'Meena')       # history unchanged
+        self.assertEqual(Booking.objects.get(seat=self.s[0], status='confirmed').passenger_name, 'Suresh')
+
+    def test_old_bookings_without_details_still_load(self):
+        old = Booking.objects.create(user=self.user, trip=self.big, seat=self.s[0])   # as made before this feature
+        self.s[0].is_booked = True; self.s[0].save()
+        res = self.client.get(f'/api/user/{self.user.id}/bookings/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual((res.data[0]['passenger_name'], res.data[0]['passenger_age'],
+                          res.data[0]['passenger_gender'], res.data[0]['contact_phone'], res.data[0]['contact_email']),
+                         ('', None, '', '', ''))

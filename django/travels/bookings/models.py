@@ -60,6 +60,16 @@ class Booking(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_CONFIRMED)
     cancelled_at = models.DateTimeField(null=True, blank=True)
 
+    # Who sits in this seat. Older bookings (made before passenger details existed) keep these empty.
+    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    passenger_name = models.CharField(max_length=100, blank=True, default='')
+    passenger_age = models.PositiveSmallIntegerField(null=True, blank=True)
+    passenger_gender = models.CharField(max_length=1, choices=GENDER_CHOICES, blank=True, default='')
+    # One contact number per booking request; it is repeated on each seat's row of that request.
+    contact_phone = models.CharField(max_length=15, blank=True, default='')
+    # Where the ticket and trip updates are sent (also one per booking request).
+    contact_email = models.EmailField(blank=True, default='')
+
     def __str__(self):
         bus = self.trip.bus
         return f"{self.user.username} {bus.bus_name} {self.trip.date} {bus.start_time}-{bus.reach_time} {self.seat.seat_number}"

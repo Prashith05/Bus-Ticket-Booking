@@ -16,8 +16,9 @@ class SeatAdmin(admin.ModelAdmin):
     list_filter = ('trip__date',)
 
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ('user','trip','seat','status','booking_time')
+    list_display = ('user','passenger_name','trip','seat','status','booking_time')
     list_filter = ('status',)
+    search_fields = ('passenger_name','contact_phone','contact_email','user__username')
 
 # Register your models here.
 admin.site.register(Bus, BusAdmin)

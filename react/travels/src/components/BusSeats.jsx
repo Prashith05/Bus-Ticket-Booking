@@ -15,11 +15,47 @@ const prettyDate = (iso) => {
 // How many seats one booking may include (the server enforces the same limit).
 const MAX_SEATS_PER_BOOKING = 6
 
+// Same rules as the server (which always re-checks them). Returns the problems found, or null.
+const GENDERS = [{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }, { value: 'O', label: 'Other' }]
+
+const cleanName = (v) => (v || '').trim().replace(/\s+/g, ' ')
+
+const checkPassenger = (p = {}) => {
+  const errs = {}
+  const name = cleanName(p.name)
+  if (name.length < 2) errs.name = 'Enter the full name'
+  else if (!/\p{L}/u.test(name) || /[<>]/.test(name)) errs.name = 'Use letters only'
+  const age = Number(p.age)
+  if (String(p.age ?? '').trim() === '') errs.age = 'Enter age'
+  else if (!Number.isInteger(age) || age < 1 || age > 120) errs.age = 'Age 1–120'
+  if (!['M', 'F', 'O'].includes(p.gender)) errs.gender = 'Choose one'
+  return Object.keys(errs).length ? errs : null
+}
+
+const checkPhone = (v) => {
+  const digits = (v || '').replace(/[\s-]/g, '').replace(/^\+91/, '').replace(/^91(?=\d{10}$)/, '').replace(/^0(?=\d{10}$)/, '')
+  return /^[6-9]\d{9}$/.test(digits) ? null : 'Enter a valid 10-digit mobile number'
+}
+
+const checkEmail = (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim()) ? null : 'Enter a valid email address')
+
+// The phone and email used last time are remembered in this browser (not important if that fails).
+const saved = (key) => {
+  try { return localStorage.getItem(key) || '' } catch { return '' }
+}
+
+const fieldErrStyle = { color: '#ef4444', fontSize: 11, fontWeight: 600, marginTop: 4 }
+const invalid = (bad) => (bad ? { borderColor: '#ef4444' } : {})
+
 // `bus` below is one trip: a bus on a specific date, with that date's own seats.
 const BusSeats = ({ token }) => {
   const [bus, setBus] = useState(null)
   const [seats, setSeats] = useState([])
   const [selected, setSelected] = useState([]) // ids of the seats the person has picked
+  const [passengers, setPassengers] = useState({}) // seat id -> { name, age, gender }
+  const [phone, setPhone] = useState(() => saved('contactPhone'))
+  const [email, setEmail] = useState(() => saved('contactEmail'))
+  const [showErrors, setShowErrors] = useState(false) // show field problems after the first Book click
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState(false)
   const [toast, setToast] = useState(null)
@@ -63,6 +99,9 @@ const BusSeats = ({ token }) => {
     }
   }
 
+  const setPassengerField = (seatId, field, value) =>
+    setPassengers(prev => ({ ...prev, [seatId]: { ...prev[seatId], [field]: value } }))
+
   const handleBook = async () => {
     if (selected.length === 0 || closed) return
     if (!token) {
@@ -70,13 +109,37 @@ const BusSeats = ({ token }) => {
       setTimeout(() => navigate('/login'), 1200)
       return
     }
+    // Every picked seat needs a passenger, and we need one contact number.
+    const orderedIds = seats.filter(s => selected.includes(s.id)).map(s => s.id)
+    if (checkPhone(phone) || checkEmail(email) || orderedIds.some(id => checkPassenger(passengers[id]))) {
+      setShowErrors(true)
+      showToast('Please fill in the passenger details', 'error')
+      document.getElementById('passenger-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
     setBooking(true)
     const count = selected.length
     try {
       await api.post('/api/booking/',
-        { seats: selected },
+        {
+          contact_phone: phone.trim(),
+          contact_email: email.trim(),
+          passengers: orderedIds.map(id => ({
+            seat: id,
+            name: cleanName(passengers[id].name),
+            age: Number(passengers[id].age),
+            gender: passengers[id].gender,
+          })),
+        },
         { headers: { Authorization: `Token ${token}` } }
       )
+      try { localStorage.setItem('contactPhone', phone.trim()); localStorage.setItem('contactEmail', email.trim()) } catch { /* private mode: not important */ }
+      setShowErrors(false)
+      setPassengers(prev => {
+        const rest = { ...prev }
+        selected.forEach(id => delete rest[id])
+        return rest
+      })
       showToast(count === 1 ? 'Booking confirmed! 🎉' : `${count} seats booked! 🎉`)
       setSeats(prev => prev.map(s => selected.includes(s.id) ? { ...s, is_booked: true } : s))
       setSelected([])
@@ -307,6 +370,93 @@ const BusSeats = ({ token }) => {
               </div>
             </div>
           </div>
+          )}
+
+          {/* Passenger details: one row per picked seat, and one contact number */}
+          {!closed && selectedSeats.length > 0 && (
+            <div id="passenger-details" className="card" style={{ padding: 28, marginTop: 20 }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, marginBottom: 6 }}>Passenger Details</h3>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+                Enter the name, age and gender of the person who will travel in each seat.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {selectedSeats.map((seat, i) => {
+                  const p = passengers[seat.id] || {}
+                  const errs = (showErrors && checkPassenger(p)) || {}
+                  return (
+                    <div key={seat.id} style={{ background: 'var(--bg)', borderRadius: 12, padding: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                        <span style={{ background: 'var(--accent)', color: '#fff', borderRadius: 8, padding: '4px 10px', fontWeight: 700, fontSize: 13 }}>
+                          {seat.seat_number}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Passenger {i + 1}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 2fr) 90px minmax(120px, 1fr)', gap: 12 }}>
+                        <div className="input-group">
+                          <label className="input-label" htmlFor={`name-${seat.id}`}>Full name</label>
+                          <input
+                            id={`name-${seat.id}`} className="input-field" style={invalid(errs.name)}
+                            value={p.name || ''} maxLength={100} placeholder="As on ID"
+                            onChange={e => setPassengerField(seat.id, 'name', e.target.value)}
+                          />
+                          {errs.name && <div style={fieldErrStyle}>{errs.name}</div>}
+                        </div>
+                        <div className="input-group">
+                          <label className="input-label" htmlFor={`age-${seat.id}`}>Age</label>
+                          <input
+                            id={`age-${seat.id}`} className="input-field" style={invalid(errs.age)}
+                            type="number" min="1" max="120" inputMode="numeric"
+                            value={p.age ?? ''} placeholder="Age"
+                            onChange={e => setPassengerField(seat.id, 'age', e.target.value)}
+                          />
+                          {errs.age && <div style={fieldErrStyle}>{errs.age}</div>}
+                        </div>
+                        <div className="input-group">
+                          <label className="input-label" htmlFor={`gender-${seat.id}`}>Gender</label>
+                          <select
+                            id={`gender-${seat.id}`} className="input-field" style={invalid(errs.gender)}
+                            value={p.gender || ''}
+                            onChange={e => setPassengerField(seat.id, 'gender', e.target.value)}
+                          >
+                            <option value="">Select</option>
+                            {GENDERS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                          </select>
+                          {errs.gender && <div style={fieldErrStyle}>{errs.gender}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginTop: 20 }}>
+              <div className="input-group">
+                <label className="input-label" htmlFor="contact-email">Email address</label>
+                <input
+                  id="contact-email" className="input-field" style={invalid(showErrors && checkEmail(email))}
+                  type="email" inputMode="email" maxLength={254} placeholder="you@example.com"
+                  value={email} onChange={e => setEmail(e.target.value)}
+                />
+                {showErrors && checkEmail(email) && <div style={fieldErrStyle}>{checkEmail(email)}</div>}
+                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
+                  Your ticket and trip updates are sent here.
+                </div>
+              </div>
+              <div className="input-group">
+                <label className="input-label" htmlFor="contact-phone">Contact mobile number</label>
+                <input
+                  id="contact-phone" className="input-field" style={invalid(showErrors && checkPhone(phone))}
+                  type="tel" inputMode="tel" maxLength={16} placeholder="10-digit mobile number"
+                  value={phone} onChange={e => setPhone(e.target.value)}
+                />
+                {showErrors && checkPhone(phone) && <div style={fieldErrStyle}>{checkPhone(phone)}</div>}
+                <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
+                  We use this to reach you about this trip.
+                </div>
+              </div>
+              </div>
+            </div>
           )}
         </div>
 

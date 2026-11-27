@@ -100,5 +100,6 @@ class BookingSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'bus', 'trip', 'seat', 'booking_time', 'travel_date',
                   'bus_name', 'origin', 'destination',
                   'start_time', 'reach_time', 'seat_number',
-                  'status', 'cancelled_at', 'can_cancel']
+                  'status', 'cancelled_at', 'can_cancel',
+                  'passenger_name', 'passenger_age', 'passenger_gender', 'contact_phone', 'contact_email']
         read_only_fields = fields
